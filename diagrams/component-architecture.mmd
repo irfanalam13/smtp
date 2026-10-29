@@ -1,0 +1,33 @@
+flowchart TB
+  subgraph CP[Control plane]
+    api[API gateway]
+    identity[Identity and authorization]
+    tenant[Tenant/domain/policy]
+    audit[Audit]
+    api --> identity --> tenant
+    tenant --> audit
+  end
+  subgraph DP[Data plane]
+    smtp[SMTP submission]
+    accept[Acceptance transaction]
+    sched[Queue and scheduler]
+    worker[Delivery worker]
+    smtp --> accept --> sched --> worker
+  end
+  subgraph SH[Shared platform]
+    pg[(PostgreSQL)]
+    obj[(Encrypted object storage)]
+    evt[(Outbox/event stream)]
+    kms[KMS/secrets]
+    obs[Telemetry]
+  end
+  tenant --> pg
+  accept --> pg
+  sched --> pg
+  accept --> obj
+  tenant --> evt
+  worker --> evt
+  CP --> kms
+  DP --> kms
+  CP --> obs
+  DP --> obs

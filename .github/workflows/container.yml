@@ -1,0 +1,29 @@
+name: Container validation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose:
+    name: Validate local container configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose syntax
+        run: docker compose -f compose.yaml config --quiet
+      - name: Verify development image hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! git ls-files | grep -E '(^|/)\.env($|\.|/)' | grep -v '^.env.example$'

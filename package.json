@@ -1,0 +1,29 @@
+{
+  "name": "smtp-platform",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev:dashboard": "pnpm --dir smtp-dashboard dev",
+    "build:dashboard": "pnpm --dir smtp-dashboard build",
+    "lint:dashboard": "pnpm --dir smtp-dashboard lint",
+    "typecheck:dashboard": "pnpm --dir smtp-dashboard exec tsc --noEmit",
+    "format:dashboard": "pnpm exec prettier --write smtp-dashboard"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.15.0",
+      "onFail": "download"
+    }
+  },
+  "devDependencies": {
+    "next": "16.4.3",
+    "prettier": "3.6.2"
+  },
+  "packageManager": "pnpm@12.15.0",
+  "type": "module"
+}

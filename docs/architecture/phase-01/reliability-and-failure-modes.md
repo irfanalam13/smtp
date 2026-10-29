@@ -1,0 +1,35 @@
+# Reliability and failure modes
+
+## Failure matrix
+
+| Failure                       | Detection                           | Immediate behavior                                   | Acceptance/delivery impact                                                          | Recovery and operator action                                              |
+| ----------------------------- | ----------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| PostgreSQL unavailable        | readiness, connection/error metrics | stop acknowledging; retain no uncommitted success    | new acceptance fails temporary; existing workers retry with bounded backoff         | restore/fail over, reconcile outbox and leases; alert on oldest queue age |
+| Broker/event path unavailable | publish/lag metrics                 | authoritative DB state remains; consumers pause      | acceptance continues if outbox commit succeeds; webhooks/analytics lag              | replay outbox, inspect poison events                                      |
+| Object storage unavailable    | upload/HEAD errors                  | do not mark content ready                            | large-message acceptance temporary unless bounded DB fallback is explicitly allowed | restore store, reconcile pending content                                  |
+| DNS resolver failure          | timeout/error rate                  | defer delivery, do not use unvalidated address       | acceptance unaffected; outbound defers                                              | alternate approved resolver, inspect DNS health                           |
+| Remote MX unavailable         | connection/timeouts                 | lease returns to scheduled with jitter               | delivery deferred                                                                   | destination circuit breaker and backlog alert                             |
+| Network partition             | transport and database health       | isolate pools, bounded retries                       | may stop acceptance if durability uncertain                                         | restore route; reconcile ambiguous attempts                               |
+| Worker crash                  | process/liveness, lease expiry      | lease becomes reclaimable                            | accepted message remains queued; possible duplicate attempt                         | restart/drain; inspect ambiguous outcomes                                 |
+| Duplicate event               | consumer dedupe metric              | ignore already applied event                         | no critical-path effect                                                             | replay-safe consumer                                                      |
+| Queue backlog                 | depth/oldest age                    | fair scheduling and backpressure                     | acceptance may rate-limit at configured capacity                                    | add workers/storage, throttle noisy destinations                          |
+| Cache outage                  | cache errors                        | use bounded local snapshot or fail closed for policy | delivery can continue under lease; new acceptance may reject if policy unavailable  | restore cache; refresh snapshots                                          |
+| Control-plane outage          | API health/event lag                | data plane uses valid policy lease                   | new config changes unavailable; delivery continues within lease                     | restore; reconcile config version                                         |
+| Config propagation failure    | version divergence                  | reject stale dangerous changes; alert                | affected tenant may be paused rather than unsafe                                    | repair stream, force refresh                                              |
+| Secret/KMS outage             | decrypt/rotation errors             | do not expose plaintext; fail dependent operation    | acceptance/delivery stops where key unavailable                                     | restore KMS or approved cached short-lived key                            |
+| Certificate expiry            | expiry metrics/readiness            | stop affected TLS path before invalid cert use       | API/SMTP path unavailable                                                           | rotate and validate; emergency runbook                                    |
+| Disk exhaustion               | filesystem/DB metrics               | shed noncritical work, stop unsafe writes            | acceptance temporary; no silent truncation                                          | free/expand disk, verify integrity                                        |
+| AZ outage                     | node/zone health                    | load balancer/worker failover                        | reduced capacity; target remains available if topology supports                     | rebalance, restore capacity                                               |
+| Regional outage               | synthetic checks                    | failover only where designed and tested              | region-specific outage; multi-region P2                                             | restore or controlled DR                                                  |
+| Malicious traffic spike       | WAF/auth/queue metrics              | rate-limit, quarantine, suspend                      | abusive tenant rejected; healthy tenants retain fair share                          | incident response and credential rotation                                 |
+| Compromised tenant            | anomaly/complaint/bounce signals    | suspend identity/tenant and revoke credentials       | queued work is re-evaluated; delivery kill switch                                   | investigate, preserve audit, customer recovery                            |
+
+## Runtime requirements
+
+Every process needs liveness, readiness, dependency health, graceful shutdown, connection draining, bounded queues, cancellation-aware timeouts, and structured reason codes. Liveness must not depend on remote SMTP or optional analytics. Readiness must fail when the process cannot safely accept new work.
+
+Use circuit breakers for unhealthy destinations and external integrations, bulkheads for ingress/control/delivery pools, and bounded retries with jitter. Do not retry permanent SMTP errors or repeat a failed credential operation indefinitely.
+
+## Disaster recovery
+
+PostgreSQL backups are encrypted, immutable where supported, and restored regularly into a disposable environment. Queue/message metadata restore is tested separately from analytics projections. A restored system runs reconciliation before accepting public SMTP. Multi-region active-active is deferred until data residency, stable egress identity, duplicate risk, and business RTO justify the cost.

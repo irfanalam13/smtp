@@ -1,0 +1,16 @@
+flowchart TB
+  ehlo[EHLO capability negotiation]
+  ehlo --> size[SIZE]
+  ehlo --> eight[8BITMIME]
+  ehlo --> starttls[STARTTLS]
+  ehlo --> auth[AUTH]
+  ehlo --> pipeline[PIPELINING]
+  ehlo --> dsn[DSN]
+  ehlo --> utf8[SMTPUTF8]
+  size -->|RFC 1870| session[SMTP session]
+  eight -->|RFC 6152| session
+  starttls -->|RFC 3207| session
+  auth -->|RFC 4954| session
+  pipeline -->|RFC 2920| transport[SMTP transport]
+  dsn -->|RFC 3461| transport
+  utf8 -->|RFC 6531| intl[Internationalized message path]

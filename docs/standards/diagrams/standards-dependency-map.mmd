@@ -1,0 +1,12 @@
+flowchart LR
+  smtp[RFC 5321 SMTP] --> submission[RFC 6409 submission]
+  smtp --> extensions[SIZE 1870 / PIPELINING 2920 / 8BITMIME 6152]
+  smtp --> tls[STARTTLS 3207]
+  tls --> tls13[TLS 8446 / 8996]
+  smtp --> message[RFC 5322 message]
+  message --> mime[MIME 2045 / 2046 / 2047 / 2231]
+  smtp --> dns[DNS 1034 / 1035 / 2308]
+  dns --> mx[MX and Null MX 7505]
+  message --> auth[SPF 7208 / DKIM 6376 / DMARC 9989]
+  auth --> reports[DMARC reports 9990 / 9991]
+  smtp --> dsn[DSN 3461 / 3463 / 3464]

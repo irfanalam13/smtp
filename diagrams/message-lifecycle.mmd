@@ -1,0 +1,17 @@
+stateDiagram-v2
+  [*] --> Received
+  Received --> Validating
+  Validating --> Accepted
+  Validating --> PermanentlyFailed
+  Accepted --> Persisted
+  Persisted --> Queued
+  Queued --> Scheduled
+  Scheduled --> Attempting
+  Attempting --> DeliveredToNextHop
+  Attempting --> TemporarilyDeferred
+  TemporarilyDeferred --> Scheduled
+  Attempting --> PermanentlyFailed
+  PermanentlyFailed --> BouncePending
+  BouncePending --> BounceProcessed
+  Queued --> AdministrativelySuppressed
+  Scheduled --> Expired

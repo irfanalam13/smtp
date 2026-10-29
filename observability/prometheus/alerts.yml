@@ -1,0 +1,21 @@
+groups:
+  - name: smtp-platform-api
+    rules:
+      - alert: SmtpApiServerErrors
+        expr: rate(smtp_api_http_failures_total[5m]) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: SMTP API server errors are elevated
+          description: The API is returning sustained 5xx responses.
+          runbook: docs/observability/operations.md
+      - alert: SmtpApiNoRequests
+        expr: absent(smtp_api_http_requests_total)
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: SMTP API metrics are absent
+          description: The API may be down or the metrics scrape may be failing.
+          runbook: docs/observability/operations.md

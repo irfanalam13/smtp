@@ -1,0 +1,21 @@
+[package]
+name = "shared-types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+base64.workspace = true
+chacha20poly1305.workspace = true
+flate2.workspace = true
+mail-parser.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true

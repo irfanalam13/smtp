@@ -1,0 +1,13 @@
+flowchart LR
+  app[Customer application] --> edge[Public API edge]
+  user[Customer/operator] --> edge
+  edge --> control[Control plane]
+  app --> submit[SMTP submission]
+  submit --> queue[Durable queue]
+  queue --> delivery[Outbound delivery]
+  delivery <-->|SMTP| mx[Remote MX servers]
+  control --> db[(PostgreSQL)]
+  queue --> db
+  delivery --> events[(Durable events)]
+  control --> events
+  events --> consumers[Analytics, webhooks, audit]

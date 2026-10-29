@@ -1,0 +1,36 @@
+{
+  "title": "SMTP Platform API Overview",
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Requests",
+      "targets": [
+        {
+          "expr": "rate(smtp_api_http_requests_total[5m])",
+          "legendFormat": "requests/sec"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Server errors",
+      "targets": [
+        {
+          "expr": "rate(smtp_api_http_failures_total[5m])",
+          "legendFormat": "5xx/sec"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Responses by status class",
+      "targets": [
+        {
+          "expr": "rate(smtp_api_http_responses_total[5m])",
+          "legendFormat": "{{status_class}}"
+        }
+      ]
+    }
+  ]
+}

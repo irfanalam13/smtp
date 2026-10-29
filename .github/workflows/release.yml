@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to package
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package trusted release
+    if: github.event_name == 'push' || startsWith(inputs.tag, 'v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+      - name: Validate and build
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace --all-targets
+          cargo test --workspace --doc
+          cargo build --workspace --release --bins
+      - name: Assemble artifacts
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          tar --exclude-vcs --exclude=target --exclude=node_modules \
+            -czf "dist/smtp-platform-${RELEASE_VERSION}-source.tar.gz" .
+          for binary in target/release/*; do
+            if [[ -x "$binary" && -f "$binary" ]]; then
+              cp "$binary" "dist/"
+            fi
+          done
+          cargo metadata --format-version 1 --locked > "dist/smtp-platform-${RELEASE_VERSION}-cargo-metadata.json"
+          (cd dist && sha256sum * > "smtp-platform-${RELEASE_VERSION}-SHA256SUMS")
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/* \
+            --verify-tag \
+            --generate-notes \
+            --title "SMTP Platform ${RELEASE_TAG}"

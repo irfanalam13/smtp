@@ -1,0 +1,13 @@
+flowchart LR
+  internet[Untrusted internet] -.-> edge{{Public edge}}
+  edge -->|authenticated| control[Control plane]
+  edge -->|bounded SMTP| submit[Submission]
+  remote[Remote MX] <-->|TLS/SMTP| delivery[Delivery]
+  control -->|tenant-scoped| data[(Tenant data)]
+  submit -->|durable acceptance| data
+  delivery -->|least privilege| data
+  operator[Privileged operator] -->|MFA + audit| admin[Admin boundary]
+  admin --> control
+  keys[KMS/secrets] --> control
+  keys --> submit
+  keys --> delivery

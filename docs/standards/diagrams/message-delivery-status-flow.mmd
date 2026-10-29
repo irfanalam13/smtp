@@ -1,0 +1,13 @@
+stateDiagram-v2
+  [*] --> Submitted
+  Submitted --> Accepted
+  Accepted --> Attempting
+  Attempting --> DeliveredToNextHop: 2xx
+  Attempting --> Deferred: 4xx / temporary DNS / timeout
+  Deferred --> Attempting
+  Attempting --> PermanentFailure: 5xx / Null MX
+  Attempting --> Ambiguous: connection lost after DATA
+  Ambiguous --> Attempting
+  PermanentFailure --> BouncePending
+  BouncePending --> BounceProcessed
+  Accepted --> Expired

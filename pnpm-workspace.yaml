@@ -1,0 +1,4 @@
+packages:
+  - smtp-dashboard
+allowBuilds:
+  unrs-resolver: true

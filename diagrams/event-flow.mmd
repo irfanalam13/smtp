@@ -1,0 +1,11 @@
+flowchart LR
+  acceptance[Acceptance transaction] --> outbox[(Transactional outbox)]
+  control[Control changes] --> outbox
+  delivery[Delivery outcomes] --> outbox
+  outbox --> bus[Durable event stream]
+  bus --> audit[Audit consumer]
+  bus --> usage[Usage/analytics consumer]
+  bus --> webhook[Webhook consumer]
+  bus --> suppression[Bounce/suppression consumer]
+  audit --> auditdb[(Restricted audit store)]
+  usage --> read[(Derived read models)]

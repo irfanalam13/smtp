@@ -1,0 +1,25 @@
+flowchart TB
+  internet[Internet] --> edge[Managed edge/WAF]
+  subgraph AZ1[Availability zone 1]
+    api1[Control/API]
+    smtp1[SMTP ingress]
+    worker1[Queue/delivery]
+  end
+  subgraph AZ2[Availability zone 2]
+    api2[Control/API]
+    smtp2[SMTP ingress]
+    worker2[Queue/delivery]
+  end
+  edge --> api1
+  edge --> api2
+  edge --> smtp1
+  edge --> smtp2
+  api1 --> pg[(Managed PostgreSQL HA)]
+  api2 --> pg
+  worker1 --> pg
+  worker2 --> pg
+  worker1 --> obj[(Encrypted object storage)]
+  worker2 --> obj
+  kms[KMS/secrets] --> api1
+  kms --> smtp1
+  kms --> worker1

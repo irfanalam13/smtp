@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: false
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo check --workspace --all-targets
+      - run: cargo test --workspace --all-targets
+      - run: cargo test --workspace --doc
+      - run: cargo build --workspace --all-targets
+
+  go:
+    name: Go validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: smtp-api/go.mod
+          cache: true
+          cache-dependency-path: smtp-api/go.mod
+      - run: test -z "$(gofmt -l smtp-api)"
+      - run: go test ./...
+        working-directory: smtp-api
+      - run: go vet ./...
+        working-directory: smtp-api
+      - run: go build ./...
+        working-directory: smtp-api
+
+  dashboard:
+    name: Dashboard validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint:dashboard
+      - run: pnpm typecheck:dashboard
+      - run: pnpm build:dashboard
+
+  migrations-and-queue:
+    name: PostgreSQL queue integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: smtp_platform_test
+          POSTGRES_USER: smtp_dev
+          POSTGRES_PASSWORD: ci-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U smtp_dev -d smtp_platform_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - name: Apply migrations
+        env:
+          DATABASE_URL: postgres://smtp_dev:ci-password@127.0.0.1:5432/smtp_platform_test?sslmode=disable
+        run: |
+          docker run --rm --network host \
+            -v "$GITHUB_WORKSPACE/smtp-storage/postgres:/migrations:ro" \
+            migrate/migrate:v4.18.3 \
+            -path=/migrations -database "$DATABASE_URL" up
+      - name: Verify schema
+        run: |
+          docker run --rm --network host -e PGPASSWORD=ci-password postgres:17 \
+            psql -h 127.0.0.1 -U smtp_dev -d smtp_platform_test \
+            -tAc "SELECT COUNT(*) FROM schema_metadata WHERE id = 1 AND platform_name = 'smtp-platform' AND to_regclass('public.mail_queue') IS NOT NULL AND to_regclass('public.tenants') IS NOT NULL AND to_regclass('public.api_keys') IS NOT NULL AND to_regclass('public.mailboxes') IS NOT NULL AND to_regclass('public.inbound_messages') IS NOT NULL;" \
+            | grep -qx 1
+      - name: Run queue integration tests
+        env:
+          TEST_DATABASE_URL: postgres://smtp_dev:ci-password@127.0.0.1:5432/smtp_platform_test?sslmode=disable
+        run: cargo test -p mail-queue --test postgres -- --ignored --test-threads=1

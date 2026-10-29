@@ -1,0 +1,12 @@
+sequenceDiagram
+  participant Sender
+  participant Platform
+  participant DNS
+  participant Receiver
+  Sender->>Platform: Submit envelope and RFC 5322 message
+  Platform->>DNS: Read SPF/DKIM/DMARC policy
+  Platform->>Platform: Authorize tenant and sign DKIM when enabled
+  Platform->>Receiver: SMTP delivery with authentication signals
+  Receiver->>DNS: Evaluate SPF, DKIM key, and DMARC policy
+  Receiver-->>Platform: SMTP result / optional report
+  Platform->>Platform: Record status without claiming inbox placement

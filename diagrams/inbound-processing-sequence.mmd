@@ -1,0 +1,16 @@
+sequenceDiagram
+  participant MX as Remote MX
+  participant I as Inbound SMTP
+  participant DB as PostgreSQL
+  MX->>I: SMTP envelope and DATA
+  I->>I: Validate bounds and recipient
+  I->>DB: Commit mailbox route, raw content, metadata
+  alt Commit succeeds
+    DB-->>I: Committed
+    I-->>MX: 250 accepted
+  else Storage failure
+    DB-->>I: Failure
+    I-->>MX: 451 temporary failure
+  else Unknown recipient
+    I-->>MX: 550 rejected
+  end

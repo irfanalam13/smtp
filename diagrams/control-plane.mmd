@@ -1,0 +1,11 @@
+flowchart LR
+  client[API client] --> gateway[API gateway]
+  gateway --> auth[OIDC/API-key verifier]
+  auth --> tenant[Tenant and domain service]
+  tenant --> policy[Policy and quota]
+  tenant --> audit[Audit service]
+  tenant --> pg[(PostgreSQL)]
+  policy --> snapshot[Signed policy snapshot]
+  snapshot --> data[Data-plane cache/lease]
+  tenant -->|configuration events| outbox[(Outbox)]
+  outbox --> data

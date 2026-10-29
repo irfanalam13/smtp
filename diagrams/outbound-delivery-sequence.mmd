@@ -1,0 +1,22 @@
+sequenceDiagram
+  participant C as Client
+  participant S as SMTP submission
+  participant DB as PostgreSQL
+  participant Q as Queue worker
+  participant MX as Remote MX
+  C->>S: SMTP transaction / API request
+  S->>DB: Commit message, envelope, idempotency, outbox
+  DB-->>S: Commit confirmed
+  S-->>C: 250 accepted
+  Q->>DB: Claim due row with lease
+  Q->>MX: Connect, EHLO, STARTTLS, MAIL/RCPT/DATA
+  alt Remote 2xx
+    MX-->>Q: 2xx accepted
+    Q->>DB: Commit delivered_to_next_hop with lease
+  else Temporary/ambiguous
+    MX-->>Q: timeout or 4xx
+    Q->>DB: Commit deferred/ambiguous with retry schedule
+  else Permanent
+    MX-->>Q: 5xx
+    Q->>DB: Commit permanent failure and bounce event
+  end
