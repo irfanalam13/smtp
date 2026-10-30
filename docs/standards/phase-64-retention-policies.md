@@ -16,6 +16,11 @@ Trash purge skips held messages. A periodic worker, mailbox-level policy
 management, audit trail for hold changes, deletion attestations, and
 jurisdiction-specific configuration are not implemented.
 
+**Why this remains open:** Metadata and a guarded purge operation do not apply
+a retention policy automatically. The policy owner, jurisdictional rules, and
+audited transitions must be settled before a scheduled worker can safely
+delete customer data; no automatic expiration is enabled.
+
 ## Acceptance criteria
 
 - Purge is idempotent and hold-aware.

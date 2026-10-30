@@ -28,10 +28,11 @@
   tied to the MX hostname, and advertised STARTTLS failures never downgrade.
 - SMTP replies, message sizes, MX candidates, and connection attempts are
   bounded. Delivery diagnostics must not include message bodies or credentials.
-- The Milestone 4 control plane uses a development-only identity adapter when
-  `CONTROL_PLANE_DEV_MODE=true`; production OIDC validation is intentionally
-  deferred until issuer and audience configuration exists. The local header
-  must never be accepted in production.
+- The control plane supports scoped API keys and optional Keycloak OIDC
+  access-token validation for pre-provisioned users; the development-only
+  `X-Dev-Subject` adapter requires an explicit development environment.
+  Production browser sessions, user provisioning, and MFA policy remain
+  unimplemented. Never accept the local header outside development.
 - Tenant IDs come from the authenticated principal, not request payloads.
   Domains and API keys are checked at the service boundary before every
   operation. Authorization is default-deny and resource tenant scope must

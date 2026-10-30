@@ -38,3 +38,39 @@ func TestReadyHandler(t *testing.T) {
 		}
 	})
 }
+
+func TestReadinessDrainStopsAdvertisingReady(t *testing.T) {
+	readiness := &Readiness{}
+	dependencyChecked := false
+	handler := readiness.Handler(func() bool {
+		dependencyChecked = true
+		return true
+	})
+
+	recorder := httptest.NewRecorder()
+	handler(recorder, httptest.NewRequest(http.MethodGet, "/health/ready", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status before drain = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	readiness.Drain()
+	dependencyChecked = false
+	recorder = httptest.NewRecorder()
+	handler(recorder, httptest.NewRequest(http.MethodGet, "/health/ready", nil))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status after drain = %d, want %d", recorder.Code, http.StatusServiceUnavailable)
+	}
+	if dependencyChecked {
+		t.Fatal("dependency check ran after readiness was withdrawn")
+	}
+}
+
+func TestReadinessHandlerRejectsNilCheck(t *testing.T) {
+	readiness := &Readiness{}
+	recorder := httptest.NewRecorder()
+	readiness.Handler(nil)(recorder, httptest.NewRequest(http.MethodGet, "/health/ready", nil))
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusServiceUnavailable)
+	}
+}

@@ -22,6 +22,11 @@ schema and reserved-key policy, audit and export/deletion semantics, selective
 indexing, query cost controls, and privacy/retention review. The SQL index does
 not by itself provide a stable public search API.
 
+**Why this remains open:** Storage schema alone does not define safe user
+operations. Without validation, authorization, privacy rules, and lifecycle
+semantics, arbitrary properties could become unbounded, leak through search or
+export, or be mistaken for trusted system state.
+
 ## Acceptance criteria
 
 - Untrusted properties are never interpreted as authorization or protocol

@@ -35,10 +35,23 @@ source .env
 set +a
 
 : "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-: "${DATABASE_URL:=postgres://smtp_dev:${POSTGRES_PASSWORD}@localhost:5432/smtp_platform?sslmode=disable}"
-: "${API_ADDR:=:8080}"
+: "${POSTGRES_HOST_PORT:=5432}"
+: "${DATABASE_URL:=postgres://smtp_dev:${POSTGRES_PASSWORD}@localhost:${POSTGRES_HOST_PORT}/smtp_platform?sslmode=disable}"
+: "${API_ADDR:=127.0.0.1:8080}"
 : "${CONTROL_PLANE_DEV_MODE:=true}"
-export DATABASE_URL API_ADDR CONTROL_PLANE_DEV_MODE
+APP_ENVIRONMENT=development
+case "$API_ADDR" in
+  127.0.0.1:*) ;;
+  :*)
+    printf 'Rebinding wildcard API address %s to localhost for local development.\n' "$API_ADDR" >&2
+    API_ADDR="127.0.0.1${API_ADDR}"
+    ;;
+  *)
+    printf 'API_ADDR must use 127.0.0.1 in the localhost-only development runner (got %s).\n' "$API_ADDR" >&2
+    exit 1
+    ;;
+esac
+export DATABASE_URL POSTGRES_HOST_PORT API_ADDR APP_ENVIRONMENT CONTROL_PLANE_DEV_MODE
 
 children=()
 cleanup() {
@@ -85,7 +98,9 @@ Development services are running:
   API:       http://localhost:8080
   Dashboard: http://localhost:3000
   SMTP:      127.0.0.1:2525
-  Database:  localhost:5432
+EOF
+printf '  Database:  localhost:%s\n\n' "$POSTGRES_HOST_PORT"
+cat <<'EOF'
 
 Use Ctrl-C to stop application processes. PostgreSQL remains running for the
 next start; use `make dev-down` when you want to stop it.

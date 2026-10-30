@@ -12,10 +12,17 @@ mailbox-scoped, bounded, and must never be treated as authorization tokens.
 ## Implementation and remaining
 
 The repository exposes permission-checked incremental changes. Database
-triggers journal message insert/delete/move/flag updates; the next migration
-adds label and custom-property change journaling. Full snapshot reset,
-retention/compaction, mod-sequences, IMAP QRESYNC/CONDSTORE, and authenticated
-web/mobile APIs remain pending.
+triggers journal message insert/delete/move/flag updates. Migration `000011`
+also journals label assignments, draft revisions, and custom-property
+updates. Cursor expiry/full-resync, retention/compaction, mod-sequences, IMAP
+QRESYNC/CONDSTORE, event consumers, and authenticated web/mobile APIs remain
+pending.
+
+**Why this remains open:** The journal records committed changes but does not
+yet give clients a complete recovery contract when cursors expire, nor does it
+provide protocol adapters that make devices converge. Retention and
+compaction also need explicit cursor invalidation behavior to avoid silent
+gaps.
 
 ## Acceptance criteria
 

@@ -15,8 +15,16 @@ mailbox byte count.
 PostgreSQL tracks `used_bytes` and `quota_bytes`; append and immutable draft
 revisions charge under row-level serialization, and Trash/expunge release
 message bytes. The repository adds authorized usage reads and quota changes
-that cannot lower the limit below current usage. Notification delivery,
-warning history, storage-class accounting, and API routes remain pending.
+that cannot lower the limit below current usage. It reports 80% and 95%
+utilization warnings, but notification delivery/history, storage-class
+accounting, authenticated API routes, and concurrent load evidence remain
+pending.
+
+**Why this remains open:** Enforcement currently accounts for raw message and
+draft bytes, not attachment/object-store or backup tiers. Warning thresholds
+are repository results rather than delivered notifications, and the feature
+still needs a public API and concurrency validation before users can rely on
+the reported limits.
 
 ## Acceptance criteria
 

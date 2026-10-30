@@ -27,10 +27,16 @@ tenant and mailbox authorization.
 
 Migration `000008` adds nullable header/conversation projections and a
 message-label relation while retaining the existing system-flag array and
-keywords table. The current append API only stores raw bytes, flags, and
-internal date. Header parsing, projection writes, read/unread conveniences,
-priorities, thread reconciliation, label APIs, durable sync events, and
-reindex jobs remain pending.
+keywords table. The PostgreSQL append path now derives and persists a
+mailbox-scoped conversation link from MIME threading headers. Full bounded
+header/body projection, read/unread and priority APIs, thread reconciliation,
+label APIs, projection rebuilds, and search-index population remain pending.
+
+**Why this remains open:** A few append-time fields do not amount to a complete
+metadata pipeline. Projections must be derived reliably from canonical bytes,
+updated transactionally or replayably, and synchronized with authorized
+mailbox changes; otherwise search and clients can observe incomplete or stale
+state.
 
 ## Acceptance criteria
 

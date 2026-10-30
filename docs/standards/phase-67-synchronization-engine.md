@@ -17,6 +17,11 @@ the current migration. Cursor retention/reset, UIDVALIDITY reset behavior,
 CONDSTORE/QRESYNC protocol support, backpressure, load benchmarks, and real
 client interoperability remain pending.
 
+**Why this remains open:** The internal journal is an adapter substrate, not
+an IMAP multi-device synchronization engine. Clients need defined behavior
+for expired cursors and UID state, while protocol support and backpressure
+need interoperability and load evidence.
+
 ## Acceptance criteria
 
 - Changes are ordered per mailbox and reads have stable bounded pagination.

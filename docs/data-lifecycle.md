@@ -4,11 +4,11 @@
 
 | Data | Current storage | Current exposure |
 | --- | --- | --- |
-| Tenant, domain, membership, and API-key metadata | In-memory Go store; schema migration exists | Tenant-scoped API responses |
-| API-key secret | Never stored in plaintext; hash in the development store | Returned once at creation |
+| Tenant, domain, membership, and API-key metadata | PostgreSQL for durable accounts; in-memory Go store for local development | Tenant-scoped API responses |
+| API-key secret | Never stored in plaintext; verifier hash in PostgreSQL or the development store | Returned once at creation |
 | Queue message and envelope data | PostgreSQL queue tables when queue integration is enabled | Worker and queue diagnostics |
 | Inbound raw message and routing metadata | PostgreSQL inbound tables when enabled | Metadata APIs only |
-| DNS check results | In-memory control-plane cache | Tenant-scoped readiness APIs |
+| DNS check results | Process-local cache for local and durable accounts; cleared on API restart | Tenant-scoped readiness APIs |
 | Logs and metrics | Process output/metrics hooks | Must exclude message content and credentials |
 
 ## Current behavior

@@ -29,6 +29,11 @@ Sieve interoperability if selected, per-tenant quotas, audit/observability,
 duplicate-delivery semantics, and external delivery failure/retry tests. This
 execution applies only to callers using the PostgreSQL append path.
 
+**Why this remains open:** Rules currently run only when a caller uses the
+PostgreSQL append path. SMTP and submission adapters, management APIs, and
+delivery retry semantics are not wired, so rule behavior is not yet consistent
+across all mail entry points.
+
 ## Acceptance criteria
 
 - Evaluation has hard limits on rule count, expression depth, and action count.

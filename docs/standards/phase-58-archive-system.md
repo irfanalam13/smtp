@@ -27,6 +27,11 @@ requirements, asynchronous tier/restore workers, integrity checks, key
 management, lifecycle audit, retention-safe deletion, and measured retrieval
 and recovery SLAs.
 
+**Why this remains open:** The current operation stores policy metadata only;
+it does not move bytes to an archive tier. Storage transitions require an
+approved retention policy, verifiable object movement, key management, and
+tested restore behavior before archived content can be relied upon.
+
 ## Acceptance criteria
 
 - Archival state is durable and has a replayable transition history.

@@ -26,6 +26,11 @@ Still required: scheduled purge worker, configurable retention operations,
 protocol/API integration, and disaster-recovery/load tests. No worker currently
 invokes purge on a schedule.
 
+**Why this remains open:** The repository provides guarded operations but no
+scheduled service or customer-facing workflow invokes them. Retention and
+protocol expunge have different semantics, so they must be integrated without
+discarding recoverable messages or bypassing legal holds.
+
 ## Acceptance criteria
 
 - Restore and purge are mutually safe, authorized, and idempotent.

@@ -25,6 +25,11 @@ Still required: authenticated autosave/version/restore APIs, cross-device
 protocol synchronization, draft expiry policy, blob storage integration, and
 production concurrency/quota tests. No autosave endpoint is wired yet.
 
+**Why this remains open:** The database save primitive is not yet an editor or
+client workflow. Autosave, restore, and cross-device updates require exposed
+authorized APIs and conflict/expiry rules that preserve immutable revisions
+and quota accounting.
+
 ## Acceptance criteria
 
 - Each accepted revision is immutable and ordered per draft.

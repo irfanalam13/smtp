@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMetricsMiddlewareAndHandler(t *testing.T) {
@@ -23,11 +24,52 @@ func TestMetricsMiddlewareAndHandler(t *testing.T) {
 	metrics.Handler(output, request)
 	body := output.Body.String()
 	if !strings.Contains(body, "smtp_api_http_requests_total 1") ||
-		!strings.Contains(body, `status_class="2xx"`) {
+		!strings.Contains(body, `status_class="2xx"`) ||
+		!strings.Contains(body, "smtp_api_http_active_requests 0") ||
+		!strings.Contains(body, `smtp_api_http_request_duration_seconds_bucket{le="+Inf"} 1`) ||
+		!strings.Contains(body, "smtp_api_http_request_duration_seconds_count 1") {
 		t.Fatalf("unexpected metrics output: %s", body)
 	}
 	if strings.Contains(body, "secret-id") {
 		t.Fatal("metrics must not expose resource identifiers")
+	}
+}
+
+func TestMetricsTrackActiveRequests(t *testing.T) {
+	metrics := NewMetrics()
+	handler := metrics.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		output := httptest.NewRecorder()
+		metrics.Handler(output, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		if !strings.Contains(output.Body.String(), "smtp_api_http_active_requests 1") {
+			t.Fatalf("active request gauge missing while handler is running: %s", output.Body.String())
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/usage", nil))
+
+	output := httptest.NewRecorder()
+	metrics.Handler(output, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(output.Body.String(), "smtp_api_http_active_requests 0") {
+		t.Fatalf("active request gauge did not return to zero: %s", output.Body.String())
+	}
+}
+
+func TestMetricsObserveDurationHistogramCumulatively(t *testing.T) {
+	metrics := NewMetrics()
+	metrics.Observe(http.StatusOK, 20*time.Millisecond)
+	output := httptest.NewRecorder()
+	metrics.Handler(output, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := output.Body.String()
+	for _, sample := range []string{
+		`smtp_api_http_request_duration_seconds_bucket{le="0.005"} 0`,
+		`smtp_api_http_request_duration_seconds_bucket{le="0.025"} 1`,
+		`smtp_api_http_request_duration_seconds_bucket{le="10"} 1`,
+		`smtp_api_http_request_duration_seconds_sum 0.02`,
+		"smtp_api_http_request_duration_seconds_count 1",
+	} {
+		if !strings.Contains(body, sample) {
+			t.Errorf("missing histogram sample %q in:\n%s", sample, body)
+		}
 	}
 }
 

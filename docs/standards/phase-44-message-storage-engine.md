@@ -39,6 +39,12 @@ compression, object store, deduplication transaction, outbox, attachment
 reference lifecycle, or idempotent append key. Consequently this is not yet a
 high-scale storage engine.
 
+**Why this remains open:** Inline `BYTEA` storage is a bounded implementation,
+not the required durable large-object backend. Moving bytes out of PostgreSQL
+needs atomic visibility with metadata and quota, retry-safe cleanup, encryption,
+and recovery tests; adding these without those guarantees could lose or expose
+messages.
+
 ## Acceptance criteria
 
 - Exact message bytes round-trip after process/database restart.

@@ -16,6 +16,11 @@ Messages retain canonical raw bytes in PostgreSQL. There are no export/import
 endpoints, streaming archive jobs, MBOX variants, PST conversion, manifest,
 dry-run validation, or migration checkpoint/retry tools.
 
+**Why this remains open:** Retaining source bytes is not an import/export
+workflow. Interoperability requires explicit MBOX variant and PST-tool
+decisions, plus bounded streaming, validation, authorization, duplicate
+handling, and resumable jobs to avoid corrupting or exposing mailbox data.
+
 ## Acceptance criteria
 
 - Import validates size, MIME, message count, duplicate policy, and target

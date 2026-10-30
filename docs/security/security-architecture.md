@@ -2,11 +2,11 @@
 
 ## Implemented boundary
 
-The current control plane authenticates either a scoped API key or, only when
-`CONTROL_PLANE_DEV_MODE=true`, a development subject header. The development
-adapter is rejected when `APP_ENVIRONMENT` is `production` or `prod`. No
-production OIDC issuer is configured yet, so the adapter is not a production
-identity system.
+The current control plane authenticates a scoped API key, an optional
+Keycloak OIDC access token for a pre-provisioned user, or—only when
+`CONTROL_PLANE_DEV_MODE=true` in an explicitly development environment—a
+development subject header. The development adapter is rejected in all other
+environments.
 
 Authentication produces a principal with a stable subject, tenant, role, and
 scopes. Authorization is evaluated at the HTTP boundary and again by store
@@ -32,10 +32,12 @@ come from authenticated state, not request payloads.
 
 ## Deferred production integrations
 
-- OIDC issuer and audience validation.
-- Production API-key persistence and external secret management.
+- Browser OIDC authorization-code/PKCE flow, session lifecycle, and enforced
+  MFA policy.
+- Production identity provisioning/deprovisioning workflows.
+- Production API-key persistence and AWS Secrets Manager integration.
 - mTLS or workload identity for service-to-service calls.
-- KMS/HSM-backed encryption keys and certificate provisioning.
+- AWS KMS/Secrets Manager-backed key management and certificate provisioning.
 - Durable audit persistence in the control-plane runtime.
 
 These are tracked as deployment requirements rather than represented as
@@ -43,9 +45,9 @@ completed controls.
 
 ## Remaining implementation
 
-The local security foundation is intentionally not a production identity
-platform. OIDC, durable credentials and audit storage, workload identity,
-KMS/HSM, certificate lifecycle, and security operations remain deferred because
-their providers and deployment ownership are not selected. See the [phase
-implementation status](../phase-status.md) under Phase 07 for the reason and
-the Phase 08/10 conditions for applying each control.
+The API's OIDC verifier is a resource-server slice, not a complete production
+identity platform. Durable credentials and audit storage, EKS workload
+identity, AWS KMS/Secrets Manager, certificate lifecycle, and security
+operations remain deferred. See the [phase implementation
+status](../phase-status.md) under Phase 07 for the remaining controls and
+release conditions.

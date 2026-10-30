@@ -18,6 +18,12 @@ new operations from being cleared while an earlier batch is in flight.
 Durable encrypted cache, persistent operation IDs, retry/dead-letter handling,
 conflict UI, and crash recovery remain client responsibilities.
 
+**Why this remains open:** The repository contains only an in-memory reference
+queue, not a durable web, desktop, or mobile client cache. Offline operation
+requires client-platform encryption and restart-safe cursors/mutations, plus
+an explicit conflict experience; server-side primitives alone cannot provide
+that client behavior.
+
 ## Acceptance criteria
 
 - Acknowledging a sent batch cannot discard operations queued after that batch.

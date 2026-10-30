@@ -1,3 +1,6 @@
+pub mod ai_features;
+pub mod ai_retrieval;
+pub mod ai_suggestions;
 pub mod arc;
 pub mod attachments;
 pub mod authentication;
@@ -15,6 +18,7 @@ pub mod mailbox;
 pub mod mailbox_store;
 pub mod mime;
 pub mod offline;
+pub mod regional_topology;
 pub mod rules;
 pub mod runtime;
 pub mod search;
@@ -22,6 +26,11 @@ pub mod secrets;
 pub mod sync;
 pub mod threading;
 
+pub use ai_features::{EmailFeatures, extract_email_features};
+pub use ai_retrieval::{
+    EmbeddedMessage, RetrievalScope, SemanticHit, SemanticSearchError, semantic_search,
+};
+pub use ai_suggestions::{DraftSuggestion, DraftSuggestionError, DraftSuggestionKind};
 pub use arc::{
     ArcChain, ArcError, ArcInstance, ArcResult, ArcVerifier, validate_arc_chain, verify_arc_chain,
 };
@@ -60,6 +69,9 @@ pub use mailbox_store::{
 };
 pub use mime::{MimeError, MimeLimits, ParsedAttachment, ParsedMessage, parse_message};
 pub use offline::{OfflineMailbox, OfflineOperation, OfflineRecord};
+pub use regional_topology::{
+    RegionDefinition, RegionRole, RegionalService, RegionalTopology, RegionalTopologyError,
+};
 pub use rules::{
     MailRule, RuleAction, RuleCondition, RuleContext, RuleDirection, RuleError, RuleField,
     RuleMatchOperator, RulePlan, RulePlanner, RuleSizeOperator,

@@ -38,7 +38,15 @@ are immutable and forward-only:
 - `000002`–`000003`: durable mail queue, idempotency, attempts, and terminal
   state compatibility;
 - `000004`: tenant, domain, API-key, membership, and audit metadata;
-- `000005`: verified-domain mailboxes and inbound message persistence.
+- `000005`: nullable reverse-path support;
+- `000006`: verified-domain inbound mailboxes and message persistence;
+- `000007`–`000008`: mailbox folders/messages and mailbox permissions;
+- `000009`–`000010`: search projections and mailbox workflows;
+- `000011`: mailbox metadata sync/outbox journaling;
+- `000012`: API-key creator membership binding for mailbox authorization;
+- `000013`: explicit tenant- versus user-bound API-key classification.
+- `000014`: inbound message/mailbox tenant-consistency constraint.
+- `000015`: optional OIDC issuer binding for provisioned user identities.
 
 The database enforces primary keys, foreign keys, uniqueness, bounded lengths,
 state checks, and payload-size checks. Timestamps use `TIMESTAMPTZ`; persistence
@@ -78,9 +86,10 @@ not invent them.
 
 ## Remaining implementation
 
-The PostgreSQL foundation is complete for the current prototype, but
-control-plane repositories, durable read models, production retention,
-encrypted backup operations, and conditional object-storage/Redis adapters
-remain deferred. Their reasons and the phases or measured prerequisites for
-applying them are recorded in the [phase implementation status](../phase-status.md)
-under Phase 06.
+Migration `000012` binds newly issued API keys to their creating tenant member;
+older unbound keys are not authorized for mailbox reads and must be rotated.
+The Go API now uses PostgreSQL for mailbox list/message reads and key
+authentication. Other control-plane repositories, durable domain read models,
+production retention, encrypted backup operations, and conditional
+object-storage/Redis adapters remain deferred. Their reasons and measured
+prerequisites are recorded in the [phase implementation status](../phase-status.md).

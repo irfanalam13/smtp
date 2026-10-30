@@ -26,6 +26,11 @@ Still required: update/delete and bulk APIs, virtual query validation/execution,
 cache invalidation, IMAP/JMAP mapping, and migration/reconciliation tests at
 production data volume.
 
+**Why this remains open:** The repository implements only a subset of the
+label lifecycle and these operations are not a complete public client
+contract. Smart-label execution and protocol mapping also need bounded,
+validated semantics so they cannot return stale or unauthorized messages.
+
 ## Acceptance criteria
 
 - Assignment cannot cross mailbox boundaries.

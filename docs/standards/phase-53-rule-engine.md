@@ -28,6 +28,11 @@ dead-letter operations, per-tenant concurrency/fairness, execution audit,
 versioned stored-rule schema migration, and load/failure testing. The outbox
 primitive is not a running worker or autonomous workflow platform.
 
+**Why this remains open:** The durable outbox records work but no consumer is
+running it. Asynchronous actions need delivery integration, fair tenant
+scheduling, and bounded retry/dead-letter handling before they can be enabled
+reliably.
+
 ## Acceptance criteria
 
 - Evaluation is deterministic, bounded, and side-effect-free.

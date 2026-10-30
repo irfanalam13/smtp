@@ -87,18 +87,26 @@ The durable API is tenant-scoped and requires authorization on every request:
 Responses must not reveal whether a resource exists outside the caller's
 tenant. Mutations need request IDs, idempotency where retried, audit events,
 bounded payloads, and stable error codes. The current Go control-plane routes
-for mailbox reads use in-memory state and are not this durable API.
+  for mailbox listing and bounded message reads now use PostgreSQL, but the
+  remaining target routes and mailbox write operations are not yet implemented.
 
 ## Implemented foundation and remaining work
 
 Migration `000008` adds tenant/domain-scoped aliases and permissions, mailbox
 kind/owner/quota/lifecycle metadata, folder hierarchy and UID allocation, and
 message metadata fields. The Rust store now enforces atomic append quota
-accounting and monotonically allocated folder UIDs.
+accounting and monotonically allocated folder UIDs. The Go API also serves
+mailbox listing and bounded message metadata reads from PostgreSQL, with
+user-bound API-key authentication and tenant/mailbox authorization.
 
-Still required before production: PostgreSQL-backed mailbox lifecycle and API
-handlers, authorization at the repository boundary, idempotent provisioning,
-object storage, encryption/key rotation, disaster recovery and restore tests,
-tenant-aware capacity planning, partitioning evidence, abuse/retention policy,
-and load/failure testing. “Production scale” is a validation target, not a
-capability claimed by this foundation.
+Still required before production: authenticated mailbox lifecycle/write APIs,
+idempotent provisioning, object storage, encryption/key rotation, disaster
+recovery and restore tests, tenant-aware capacity planning, partitioning
+evidence, abuse/retention policy, and load/failure testing. “Production scale”
+is a validation target, not a capability claimed by this foundation.
+
+**Why this remains open:** The durable read path is only one part of the target
+architecture. Writes, message-byte lifecycle, key management, and operational
+recovery have not been integrated and validated end to end; the current
+PostgreSQL `BYTEA` implementation and isolated tests do not establish safe
+production scale or recoverability.

@@ -39,7 +39,8 @@ Phases 01–10 is in the [phase integration review](phase-integration.md).
 ## Production blockers
 
 - Replace the in-memory Go control-plane store with PostgreSQL repositories.
-- Add production OIDC and session management.
+- Complete Keycloak OIDC user provisioning, browser session management, and
+  MFA policy evidence.
 - Add a real send API and connect it to the durable queue.
 - Enforce sender-domain authorization at the enqueue boundary.
 - Make quota accounting durable and distributed.

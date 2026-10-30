@@ -8,6 +8,9 @@
   configuration, secrets, logging, context, events, and shutdown contracts.
 - [Project status](project-status.md) — what Milestones 0–6 implement and what
   remains before production.
+- [Transactional email product scope](product/transactional-email-platform.md)
+  — market references, customer page map, implementation sequence, and
+  capability release gates.
 - [Phase implementation status](phase-status.md) — remaining code by phase,
   deferral reasons, and when each item should be applied.
 - [Phase 01–10 integration review](phase-integration.md) — phase handoffs,
@@ -36,6 +39,7 @@
 
 ## Architecture
 
+- [Repository structure and feature ownership](architecture/repository-structure.md)
 - [Phase 01 system architecture](architecture/phase-01/)
 - [Phase 02 standards and RFC research](standards/)
 - [DevOps and CI/CD](devops/)

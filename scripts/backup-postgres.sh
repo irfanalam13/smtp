@@ -20,4 +20,9 @@ else
     pg_dump --format=custom --file="/backup/$(basename "$output")" "$DATABASE_URL"
 fi
 
-printf 'Created PostgreSQL backup: %s\n' "$output"
+(
+  cd "$(dirname "$output")"
+  sha256sum "$(basename "$output")" > "$(basename "$output").sha256"
+)
+
+printf 'Created PostgreSQL backup and SHA-256 manifest: %s\n' "$output"

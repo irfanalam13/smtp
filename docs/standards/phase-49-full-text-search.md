@@ -33,6 +33,12 @@ configuration, and representative relevance testing. “Enterprise-grade” and
 “instant” need measured SLOs and workload evidence before those terms can be
 claimed.
 
+**Why this remains open:** Search currently exists as a PostgreSQL function,
+not an authenticated customer-facing capability, and its projections are not
+automatically populated. Query semantics, authorization integration, index
+freshness, abuse controls, and measured latency/relevance must be established
+before promising complete or instant search.
+
 ## Acceptance criteria
 
 - Search is isolated across tenants, folders, and current mailbox grants.

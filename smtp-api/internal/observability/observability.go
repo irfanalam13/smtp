@@ -20,7 +20,23 @@ type Metrics struct {
 	requests        atomic.Uint64
 	requestFailures atomic.Uint64
 	requestDuration atomic.Uint64
+	activeRequests  atomic.Int64
+	durationBuckets [11]atomic.Uint64
 	statuses        sync.Map
+}
+
+var requestDurationBucketBounds = [...]time.Duration{
+	5 * time.Millisecond,
+	10 * time.Millisecond,
+	25 * time.Millisecond,
+	50 * time.Millisecond,
+	100 * time.Millisecond,
+	250 * time.Millisecond,
+	500 * time.Millisecond,
+	time.Second,
+	2500 * time.Millisecond,
+	5 * time.Second,
+	10 * time.Second,
 }
 
 func NewMetrics() *Metrics {
@@ -28,10 +44,18 @@ func NewMetrics() *Metrics {
 }
 
 func (m *Metrics) Observe(status int, duration time.Duration) {
+	if duration < 0 {
+		duration = 0
+	}
 	m.requests.Add(1)
 	m.requestDuration.Add(uint64(duration / time.Microsecond))
 	if status >= http.StatusInternalServerError {
 		m.requestFailures.Add(1)
+	}
+	for i, upperBound := range requestDurationBucketBounds {
+		if duration <= upperBound {
+			m.durationBuckets[i].Add(1)
+		}
 	}
 	value := newCounter(&m.statuses, statusClass(status))
 	value.value.Add(1)
@@ -71,6 +95,9 @@ type responseWriter struct {
 }
 
 func (w *responseWriter) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
 }
@@ -86,6 +113,8 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		writer := &responseWriter{ResponseWriter: w}
+		m.activeRequests.Add(1)
+		defer m.activeRequests.Add(-1)
 		next.ServeHTTP(writer, r)
 		status := writer.status
 		if status == 0 {
@@ -123,6 +152,21 @@ func (m *Metrics) Handler(w http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(w, "# TYPE smtp_api_http_failures_total counter\nsmtp_api_http_failures_total %d\n", m.requestFailures.Load())
 	_, _ = fmt.Fprintf(w, "# HELP smtp_api_http_request_duration_microseconds_total Sum of request durations.\n")
 	_, _ = fmt.Fprintf(w, "# TYPE smtp_api_http_request_duration_microseconds_total counter\nsmtp_api_http_request_duration_microseconds_total %d\n", m.requestDuration.Load())
+	_, _ = fmt.Fprintf(w, "# HELP smtp_api_http_active_requests Current number of in-flight HTTP requests.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE smtp_api_http_active_requests gauge\nsmtp_api_http_active_requests %d\n", m.activeRequests.Load())
+	_, _ = fmt.Fprintf(w, "# HELP smtp_api_http_request_duration_seconds HTTP request duration in seconds.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE smtp_api_http_request_duration_seconds histogram\n")
+	for i, upperBound := range requestDurationBucketBounds {
+		_, _ = fmt.Fprintf(w, "smtp_api_http_request_duration_seconds_bucket{le=%q} %d\n",
+			strconv.FormatFloat(upperBound.Seconds(), 'f', -1, 64),
+			m.durationBuckets[i].Load(),
+		)
+	}
+	_, _ = fmt.Fprintf(w, "smtp_api_http_request_duration_seconds_bucket{le=\"+Inf\"} %d\n", m.requests.Load())
+	_, _ = fmt.Fprintf(w, "smtp_api_http_request_duration_seconds_sum %g\n",
+		float64(m.requestDuration.Load())/float64(time.Second/time.Microsecond),
+	)
+	_, _ = fmt.Fprintf(w, "smtp_api_http_request_duration_seconds_count %d\n", m.requests.Load())
 	m.statuses.Range(func(key, value any) bool {
 		c := key.(string)
 		counter := value.(*counter)

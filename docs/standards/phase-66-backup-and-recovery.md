@@ -16,6 +16,11 @@ dump inspection and restoration into a disposable database. No managed backup
 target, WAL archiving, encryption/key lifecycle, restore orchestration,
 application-consistent object-store snapshots, or approved RPO/RTO exists.
 
+**Why this remains open:** The runbook documents a local manual procedure; it
+does not establish protected production backups or point-in-time recovery.
+Production readiness requires recurring isolated restore exercises across
+database and object data, with measured recovery objectives and secured keys.
+
 ## Acceptance criteria
 
 - Recovery tests verify both database and object-store referential integrity.

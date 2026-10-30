@@ -3,7 +3,22 @@ package health
 import (
 	"encoding/json"
 	"net/http"
+	"sync/atomic"
 )
+
+type Readiness struct {
+	draining atomic.Bool
+}
+
+func (r *Readiness) Drain() {
+	r.draining.Store(true)
+}
+
+func (r *Readiness) Handler(check func() bool) http.HandlerFunc {
+	return ReadyHandler(func() bool {
+		return !r.draining.Load() && check != nil && check()
+	})
+}
 
 func Handler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")

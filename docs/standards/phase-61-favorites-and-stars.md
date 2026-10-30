@@ -18,6 +18,11 @@ The repository adds mailbox-authorized flag mutation and quota inspection.
 Presentation, pinned-message ordering, per-user favorites, authenticated HTTP
 routes, and IMAP command wiring remain pending.
 
+**Why this remains open:** The durable `\Flagged` value is a shared mailbox
+message flag, not a separate user-specific favorite. Client presentation and
+protocol/API routes are not wired, and per-user pinning would require a
+different ownership model.
+
 ## Acceptance criteria
 
 - Flag mutations require mailbox write permission and emit a durable sync

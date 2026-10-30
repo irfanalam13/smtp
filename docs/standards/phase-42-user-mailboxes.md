@@ -35,13 +35,20 @@ mailbox-scoped permission tables with same-tenant foreign keys. Rust
 `MailboxStore` now provides transactional mailbox creation with default-folder
 provisioning, lifecycle transitions, alias creation, and permission grants
 and revocation. These are storage primitives, not an authenticated control
-plane. Existing `GET /v1/mailboxes` remains backed by process-local Go state.
-`mailbox_addresses` is the canonical case-insensitive routing registry for
-primary addresses and aliases, preventing aliases from shadowing another
-mailbox's primary address.
-Durable REST handlers, idempotency, audit events, inbound routing, and
-authorization integration are not implemented and must not be presented as
-live service behavior.
+plane. The Go API now serves read-only mailbox listing and bounded message
+metadata from PostgreSQL, authorized through user-bound API keys and
+tenant/mailbox ownership or permissions. Domain, usage, and other control-plane
+state remain process-local. `mailbox_addresses` is the canonical
+case-insensitive routing registry for primary addresses and aliases,
+preventing aliases from shadowing another mailbox's primary address.
+Authenticated mailbox create/lifecycle, alias, and permission REST handlers,
+idempotency, audit events, inbound routing, and durable control-plane writes
+remain unimplemented; do not present them as live service behavior.
+
+**Why this remains open:** Database schema and Rust repository methods do not
+provide a usable customer workflow by themselves. The read-only Go integration
+does not yet define safe, audited, retryable write operations or connect
+provisioned mailboxes to inbound delivery.
 
 ## Acceptance criteria
 

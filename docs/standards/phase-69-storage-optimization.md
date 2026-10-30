@@ -17,6 +17,12 @@ within a tenant, but remains in-memory. Message bodies remain inline PostgreSQL
 `BYTEA`; database-level partitioning, object storage, compression migration,
 reference counts, garbage collection, and workload evidence are absent.
 
+**Why this remains open:** The prototype does not persist optimized objects or
+change the canonical message-body path. Durable deduplication and garbage
+collection must be tenant-isolated, reference-safe, versioned, and backup-aware;
+optimization also needs workload and recovery evidence before it is safe to
+operate at scale.
+
 ## Acceptance criteria
 
 - Canonical message bytes can be verified after every tier/codec transition.

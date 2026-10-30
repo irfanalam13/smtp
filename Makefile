@@ -1,4 +1,4 @@
-.PHONY: help setup doctor infra-up infra-down infra-ps dev-bootstrap dev-up dev-run deploy-preflight dev-down fmt fmt-check lint test test-api test-queue test-delivery build check clean migrate-up migrate-down migrate-validate backup-postgres validate-foundation-config
+.PHONY: help setup doctor infra-up infra-down infra-ps dev-bootstrap dev-up dev-run deploy-preflight dev-down fmt fmt-check lint test test-api test-queue test-delivery build check clean migrate-up migrate-down migrate-validate backup-postgres verify-postgres-backup validate-foundation-config
 
 help:
 	@printf '%s\n' \
@@ -27,7 +27,8 @@ help:
 		'  test-queue      Run PostgreSQL queue integration tests' \
 		'  test-delivery   Run delivery crate tests' \
 		'  migrate-validate Validate migrations against DATABASE_URL' \
-		'  backup-postgres Create a logical PostgreSQL backup'
+		'  backup-postgres Create a logical PostgreSQL backup' \
+		'  verify-postgres-backup Verify a backup SHA-256 sidecar' \
 		'  validate-foundation-config Check local and CI configuration references'
 
 setup:
@@ -141,6 +142,9 @@ migrate-validate:
 
 backup-postgres:
 	./scripts/backup-postgres.sh
+
+verify-postgres-backup:
+	./scripts/verify-postgres-backup.sh "$${BACKUP:?Set BACKUP to a backup dump path}"
 
 validate-foundation-config:
 	./scripts/validate-foundation-config.sh

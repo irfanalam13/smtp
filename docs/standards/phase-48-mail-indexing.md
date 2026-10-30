@@ -29,6 +29,11 @@ and populate these search columns, so documents must not claim messages are
 automatically searchable. Projection writes need an outbox/worker, idempotent
 upsert, delete propagation, replay cursor, dead-letter handling, and metrics.
 
+**Why this remains open:** Index tables and a query function do not make new
+messages searchable unless a reliable worker populates and updates projections.
+Parser integration, replay, delete handling, and repair are prerequisites for
+fresh and recoverable search results.
+
 ## Acceptance criteria
 
 - Every indexed field maps to a parser output and canonical message version.

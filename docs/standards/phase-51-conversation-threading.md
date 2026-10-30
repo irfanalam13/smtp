@@ -27,6 +27,11 @@ Still required: durable late-ancestor reconciliation/rebuild, RFC 5256
 algorithm output for IMAP, idempotent replay, explicit duplicate-ID policy,
 and concurrent/load testing. No IMAP threading capability is implied.
 
+**Why this remains open:** Append-time linkage handles only part of threading.
+Late-arriving ancestors, duplicate identifiers, and replay need durable,
+deterministic reconciliation; the IMAP algorithm also requires protocol-level
+integration and interoperability evidence.
+
 ## Acceptance criteria
 
 - Cross-mailbox and cross-tenant references never expose or merge conversations.

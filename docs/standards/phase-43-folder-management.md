@@ -33,6 +33,11 @@ special-use metadata, UIDNEXT, and root/child uniqueness. Rust
 transactionally. Rename, move, safe deletion, folder ACLs, IMAP LIST/STATUS,
 durable synchronization, and REST endpoints remain pending.
 
+**Why this remains open:** The persisted hierarchy and UID primitives do not
+yet expose complete folder operations to clients. Mutation and synchronization
+must be integrated together so folder changes cannot leave IMAP state and the
+durable change history inconsistent.
+
 ## Acceptance criteria
 
 - Repeated provisioning creates exactly one of each default folder.

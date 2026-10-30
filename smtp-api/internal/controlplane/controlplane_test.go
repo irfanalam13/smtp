@@ -27,7 +27,7 @@ func TestTenantIsolationAndOneTimeKeyMetadata(t *testing.T) {
 	if err != nil || secret == "" {
 		t.Fatal(err)
 	}
-	if len(s.Keys(a)) != 1 || s.Keys(a)[0].Prefix != k.Prefix {
+	if len(s.Keys(a, 50)) != 1 || s.Keys(a, 50)[0].Prefix != k.Prefix {
 		t.Fatal("key metadata missing")
 	}
 	if _, err := s.AuthenticateKey(secret); err != nil {
@@ -58,6 +58,107 @@ func TestTenantIsolationAndOneTimeKeyMetadata(t *testing.T) {
 		t.Fatal("revoked key should not authenticate")
 	}
 }
+
+func TestAPIKeyNamesAreUniquePerTenant(t *testing.T) {
+	store := NewStore()
+	alice := store.Principal("alice")
+	bob := store.Principal("bob")
+
+	if _, _, err := store.CreateKey(alice, "  integration  ", []string{"domains:read"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.CreateKey(alice, "integration", []string{"domains:read"}, nil); err != ErrConflict {
+		t.Fatalf("duplicate key name error=%v, want conflict", err)
+	}
+	if _, _, err := store.CreateKey(bob, "integration", []string{"domains:read"}, nil); err != nil {
+		t.Fatalf("same key name should be allowed in another tenant: %v", err)
+	}
+
+	prefixes := make(map[string]bool)
+	for _, key := range store.Keys(alice, 50) {
+		if prefixes[key.Prefix] {
+			t.Fatalf("duplicate generated key prefix %q", key.Prefix)
+		}
+		prefixes[key.Prefix] = true
+	}
+}
+
+func TestCreateAPIKeyReturnsConflictForDuplicateName(t *testing.T) {
+	handler := Handler{Store: NewStore(), DevMode: true}.Routes()
+	for attempt, wantStatus := range []int{http.StatusCreated, http.StatusConflict} {
+		request := httptest.NewRequest(
+			http.MethodPost,
+			"/v1/api-keys",
+			bytes.NewBufferString(`{"name":"integration","scopes":["domains:read"]}`),
+		)
+		request.Header.Set("X-Dev-Subject", "duplicate-key-test")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != wantStatus {
+			t.Fatalf("attempt %d status=%d, want %d: %s", attempt+1, response.Code, wantStatus, response.Body)
+		}
+	}
+}
+
+func TestMailboxListRespectsLimitAndStableOrder(t *testing.T) {
+	store := NewStore()
+	principal := store.Principal("mailbox-limit-test")
+	base := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	store.mailboxes["mailbox-later"] = Mailbox{
+		ID: "mailbox-later", TenantID: principal.TenantID, CreatedAt: base.Add(time.Hour),
+	}
+	store.mailboxes["mailbox-earlier"] = Mailbox{
+		ID: "mailbox-earlier", TenantID: principal.TenantID, CreatedAt: base,
+	}
+	handler := Handler{Store: store, DevMode: true}.Routes()
+	request := httptest.NewRequest(http.MethodGet, "/v1/mailboxes?limit=1", nil)
+	request.Header.Set("X-Dev-Subject", "mailbox-limit-test")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	var result struct {
+		Items []Mailbox `json:"items"`
+	}
+	if response.Code != http.StatusOK {
+		t.Fatalf("list mailboxes status=%d, want %d: %s", response.Code, http.StatusOK, response.Body)
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 || result.Items[0].ID != "mailbox-earlier" {
+		t.Fatalf("mailbox list did not honor limit and stable order: %#v", result.Items)
+	}
+}
+
+func TestListAPIKeysRespectsLimit(t *testing.T) {
+	store := NewStore()
+	principal := store.Principal("limited-key-list")
+	for _, name := range []string{"first", "second", "third"} {
+		if _, _, err := store.CreateKey(principal, name, []string{"domains:read"}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	handler := Handler{Store: store, DevMode: true}.Routes()
+	request := httptest.NewRequest(http.MethodGet, "/v1/api-keys?limit=1", nil)
+	request.Header.Set("X-Dev-Subject", "limited-key-list")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	var result struct {
+		Items []APIKey `json:"items"`
+	}
+	if response.Code != http.StatusOK {
+		t.Fatalf("list API keys status=%d, want %d: %s", response.Code, http.StatusOK, response.Body)
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("returned %d API keys, want limit of 1", len(result.Items))
+	}
+}
+
 func TestUnauthenticatedAPI(t *testing.T) {
 	h := Handler{Store: NewStore()}.Routes()
 	r := httptest.NewRequest(http.MethodGet, "/v1/domains", nil)

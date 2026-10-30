@@ -42,18 +42,20 @@ disabling certificate validation.
 
 | Path | Responsibility |
 |---|---|
-| `smtp-session/`, `smtp-delivery/`, `smtp-queue/`, `smtp-core/` | Rust protocol and data-plane workspaces |
+| `smtp-session/`, `smtp-delivery/`, `smtp-queue/`, `smtp-core/`, `smtp-imap/`, `smtp-pop3/` | Rust protocol, data-plane, and shared-core workspaces |
 | `smtp-api/` | Go control-plane API |
 | `smtp-dashboard/` | Next.js dashboard |
 | `smtp-storage/` | PostgreSQL migrations |
+| `smtp-ai/`, `smtp-analytics/`, `smtp-auth/`, `smtp-cli/`, `smtp-kubernetes/`, `smtp-monitoring/`, `smtp-parser/`, `smtp-sdk/`, `smtp-security/`, `smtp-tests/` | Planned or separately scoped boundaries; consult their contents before treating them as implemented workspaces |
 | `scripts/` | Bootstrap, local-run, and preflight scripts |
-| `docs/architecture/` | Phase 01 architecture and existing implementation notes |
+| `docs/architecture/` | System architecture, repository structure, and implementation boundaries |
 | `docs/standards/` | Phase 02 standards and RFC research |
 | `docs/development/core-infrastructure.md` | Phase 04 shared-core contracts and adoption rules |
 | `compose.yaml` | Local PostgreSQL dependency only |
 
-No empty future service directories are required. Add a component only when
-there is implementation and ownership for it.
+See the [repository structure guide](../architecture/repository-structure.md)
+for feature-level ownership and file organization. Do not add a component or
+placeholder source files just to reserve a future boundary.
 
 ## Command reference
 

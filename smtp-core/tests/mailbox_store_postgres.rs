@@ -50,6 +50,78 @@ async fn insert_tenant_fixture(pool: &PgPool, tenant_id: Uuid, domain_id: Uuid, 
     .expect("insert verified domain");
 }
 
+async fn insert_inbound_message_fixture(
+    pool: &PgPool,
+    id: Uuid,
+    tenant_id: Uuid,
+    mailbox_id: Uuid,
+    idempotency_key: Vec<u8>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO inbound_messages
+     (id, tenant_id, mailbox_id, envelope_sender, raw_message, raw_size, idempotency_key)
+     VALUES ($1, $2, $3, 'sender@example.test', $4, 7, $5)",
+    )
+    .bind(id)
+    .bind(tenant_id)
+    .bind(mailbox_id)
+    .bind(b"message".as_slice())
+    .bind(idempotency_key)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL and migrations"]
+async fn inbound_message_cannot_reference_a_mailbox_in_another_tenant() {
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&test_database_url())
+        .await
+        .expect("connect isolated test database");
+    let tenant_a = Uuid::new_v4();
+    let domain_a = Uuid::new_v4();
+    let user_a = Uuid::new_v4();
+    let tenant_b = Uuid::new_v4();
+    let domain_b = Uuid::new_v4();
+    let user_b = Uuid::new_v4();
+    insert_tenant_fixture(&pool, tenant_a, domain_a, user_a).await;
+    insert_tenant_fixture(&pool, tenant_b, domain_b, user_b).await;
+
+    let mailbox_a = Uuid::new_v4();
+    let mailbox_b = Uuid::new_v4();
+    for (mailbox_id, tenant_id, domain_id, local_part) in [
+        (mailbox_a, tenant_a, domain_a, "alpha"),
+        (mailbox_b, tenant_b, domain_b, "bravo"),
+    ] {
+        sqlx::query(
+            "INSERT INTO mailboxes (id, tenant_id, domain_id, local_part)
+         VALUES ($1, $2, $3, $4)",
+        )
+        .bind(mailbox_id)
+        .bind(tenant_id)
+        .bind(domain_id)
+        .bind(local_part)
+        .execute(&pool)
+        .await
+        .expect("insert mailbox fixture");
+    }
+
+    insert_inbound_message_fixture(&pool, Uuid::new_v4(), tenant_a, mailbox_a, vec![1; 32])
+        .await
+        .expect("same-tenant inbound message is valid");
+    let error =
+        insert_inbound_message_fixture(&pool, Uuid::new_v4(), tenant_a, mailbox_b, vec![2; 32])
+            .await
+            .expect_err("cross-tenant mailbox reference must be rejected");
+    assert!(matches!(
+    error,
+    sqlx::Error::Database(ref database_error)
+        if database_error.code().as_deref() == Some("23503")
+    ));
+}
+
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL and migrations"]
 async fn provisioning_quota_and_mailbox_lifecycle_are_transactional() {

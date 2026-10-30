@@ -14,10 +14,24 @@ their workers, operational controls, and recovery evidence are deployed.
 
 Rust repository primitives cover mailbox storage, permission checks, MIME
 projection, rules, labels, Trash, drafts, quota, and durable change/outbox
-records. The Go HTTP control plane remains in-memory and is not connected to
-that repository. SMTP ingress/egress, IMAP, object storage, queue/DSN workers,
-production identity, distributed telemetry, representative load, failover,
-backup recovery, and customer-facing API integration remain outstanding.
+records. The Go API now connects to PostgreSQL for mailbox listing and bounded
+message metadata reads. Those routes authenticate PostgreSQL API keys bound to
+active tenant users and enforce mailbox ownership/permission checks in
+tenant-scoped SQL; startup requires PostgreSQL, readiness pings it, and
+shutdown closes the pool. Other control-plane state remains in-memory.
+
+Remaining work includes OIDC/JWT identity, durable control-plane writes,
+SMTP/IMAP service adapters, object storage, outbox and retention workers,
+centralized telemetry, and representative load/failover/restore evidence.
+PostgreSQL-backed mailbox reads are a narrow vertical slice, not complete
+customer-facing platform integration.
+
+**Why this remains open:** Components and repository primitives are not yet
+connected across the entire message lifecycle. Only mailbox reads use the
+durable Go repository; identity, writes, protocol ingress/egress, background
+workers, and operational recovery still need end-to-end integration. Without
+those paths and evidence, consistent authorization, delivery, durability, and
+production readiness cannot be claimed.
 
 ## Launch gate
 

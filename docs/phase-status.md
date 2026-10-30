@@ -335,9 +335,9 @@ justify the added consistency boundary.
 
 ## Phase 07 — Security foundation
 
-**Status:** Local security primitives and threat-model documentation
-implemented; production identity and key-management integrations remain
-deferred.
+**Status:** Local security primitives and an optional Keycloak OIDC
+resource-server verifier are implemented; browser identity and key-management
+integrations remain deferred.
 
 **Implemented:** Typed human/service identities, default-deny authorization,
 resource tenant checks, scoped API-key verification, constant-time comparison,
@@ -347,22 +347,19 @@ and security regression tests.
 
 **Remaining implementation:**
 
-- Integrate an approved production OIDC issuer with issuer, audience,
-  signature, expiry, key-selection, and revocation validation.
+- Configure and operationalize the optional Keycloak OIDC resource-server
+  verifier; add browser sessions, user provisioning, and MFA policy.
 - Persist API-key verifiers and audit events through PostgreSQL repositories.
-- Add production secret-manager, KMS/HSM, certificate, and key-rotation
-  integrations.
-- Establish workload identity or mTLS for internal service calls.
+- Integrate AWS Secrets Manager, KMS, certificate lifecycle, and key rotation.
+- Establish EKS workload identity or mTLS for internal service calls.
 - Add durable audit export, alerting, access review, and incident drills.
 - Resolve the dependency advisories documented by the security workflow.
 
-**Reason and application point:** The identity provider, production secret
-manager, KMS/HSM, certificate authority, and deployment runtime are not yet
-selected. Applying these controls now would create an unowned or misleading
-production security implementation. Apply OIDC, durable credentials, and
-service identity in Phase 08 when API/service boundaries are implemented;
-apply KMS, certificates, audit operations, and incident drills in Phase 10
-before public launch.
+**Reason and application point:** Keycloak, AWS KMS/Secrets Manager, and EKS
+are selected, but no realm, AWS account/IAM, cluster, or operational ownership
+is configured. Applying provider integrations without those trust boundaries
+would be misleading and unsafe. Complete configuration and validation before
+public launch.
 
 ## Phase 08 — API and communication framework
 
@@ -457,8 +454,8 @@ requirements-to-evidence matrix, and a prioritized risk register.
 
 - Remediate the failing RustSec findings before public production delivery.
 - Replace in-memory control-plane state with durable PostgreSQL repositories.
-- Configure production OIDC, secret management, certificates, and service
-  identity.
+- Complete Keycloak user/session provisioning, AWS Secrets Manager/KMS,
+  certificate management, and EKS service identity.
 - Deploy authenticated centralized metrics, logs, traces, dashboards, and
   alert routing.
 - Run representative concurrent load, dependency-failure, and recovery tests.
@@ -481,10 +478,14 @@ integration remains pending.
 ownership, alias and shared-mailbox semantics, mailbox lifecycle, quota
 accounting, PostgreSQL metadata, object-storage migration target, authorization
 boundaries, API target, and production acceptance evidence. The migration
-enforces tenant-consistent mailbox/domain references.
+enforces tenant-consistent mailbox/domain references. The Go API now has
+PostgreSQL-backed mailbox listing and bounded message metadata reads using
+durable API keys and tenant/mailbox authorization. User-bound keys require
+mailbox ownership or an explicit permission; legacy tenant-only keys remain
+usable for existing scopes but are explicitly denied mailbox access.
 
-**Remaining implementation:** Deployable object storage, production API and
-repository integration, encryption and key lifecycle, capacity/partition
+**Remaining implementation:** Authenticated mailbox write/lifecycle APIs,
+deployable object storage, encryption and key lifecycle, capacity/partition
 strategy backed by workload evidence, disaster recovery, and load/failover
 validation.
 
@@ -504,15 +505,17 @@ added in migration `000008`. Rust storage primitives provide transactional
 mailbox provisioning with default folders, lifecycle transitions, alias
 creation, and permission grant/revocation.
 
-**Remaining implementation:** Transactional create/provision/activate,
-idempotent alias and permission APIs, audited lifecycle transitions,
-authorization integration, inbound routing to mailbox IDs, retention-aware
-deletion, and PostgreSQL-backed control-plane handlers.
+**Remaining implementation:** Authenticated mailbox provisioning, idempotent
+alias and permission APIs, audited lifecycle transitions, inbound routing to
+mailbox IDs, retention-aware deletion, and durable control-plane write
+handlers. The read-only mailbox list/message routes are now PostgreSQL-backed.
 
-**Reason and application point:** Existing control-plane mailbox endpoints
-read in-memory maps. A production mailbox API must be built on durable
-repositories and the Phase 07 authorization adapter rather than layering
-write routes over ephemeral state.
+**Reason and application point:** Mailbox reads now use durable PostgreSQL
+repositories, but mailbox writes and lifecycle operations are not exposed
+through the Go API. Durable domain operations now use PostgreSQL; usage
+counters remain in-memory.
+Build authenticated writes on the durable mailbox schema and explicit
+owner/permission authorization rather than layering them over ephemeral state.
 
 ## Phase 43 — Folder management
 
@@ -798,19 +801,28 @@ pending.
 per-recipient state projections. It distinguishes accepted/queued state from
 delivery state.
 
-**Remaining implementation:** SMTP/API submission and sent-copy transaction,
+**Implemented:** The authenticated HTTP submission endpoint now atomically
+enqueues bounded plain-text messages and recipients with idempotent retries.
+The dashboard connects through a same-origin API proxy and displays queue
+states.
+
+**Remaining implementation:** SMTP submission and sent-copy transaction,
 queue/DSN event consumer, recipient-data retention, external delivery
-synchronization, and end-to-end delivery tests.
+synchronization, and end-to-end delivery tests. The local queue worker remains
+deterministic and does not send messages externally.
 
 ## Phase 51–60 integration boundary
 
-The PostgreSQL repository APIs and migration are implemented and covered by
-the opt-in PostgreSQL integration test. They are not yet exposed through
-authenticated Go HTTP endpoints, and inbound/outbound SMTP services do not yet
-invoke these workflows. The outbox is a durable lease/ack/retry primitive,
-not a running broker worker. No claim of production readiness, service SLO,
-load capacity, disaster-recovery evidence, or compliance certification is
-made.
+The Go API now exposes authenticated PostgreSQL-backed mailbox listing and
+bounded message metadata reads. User-bound keys require an active tenant
+membership and mailbox ownership or an explicit permission. Existing
+tenant-only keys remain usable within their existing scopes but are denied
+mailbox access. PostgreSQL integration tests verify this compatibility and
+authorization boundary against an isolated database. Mailbox write workflows
+are not exposed through the API, and inbound/outbound services do not yet
+invoke these workflows. The outbox is a durable lease/ack/retry primitive, not
+a running broker worker. No claim of production readiness, service SLO, load
+capacity, disaster-recovery evidence, or compliance certification is made.
 
 ## Phase 61 — Favorites and stars
 
@@ -923,8 +935,387 @@ archival workers, and representative workload/recovery validation.
 **Status:** Cross-component PostgreSQL foundations and isolated tests exist;
 production integration is incomplete.
 
-**Remaining implementation:** The Go API is still in-memory and is not wired
-to the PostgreSQL repository. SMTP/IMAP service adapters, object storage,
-outbox/retention workers, production identity, centralized telemetry, and
-load/failover/restore evidence are still required. No production-readiness or
-Brevo/Google-scale claim is made.
+**Implemented:** Go API mailbox list/message reads authenticate PostgreSQL
+API keys bound to active tenant users and enforce mailbox owner/permission
+checks in tenant-scoped SQL. Startup requires PostgreSQL, readiness pings the
+database, and shutdown closes the pool. Other control-plane state remains
+in-memory.
+
+**Remaining implementation:** OIDC/JWT integration, durable domain/control
+plane writes, SMTP/IMAP service adapters, object storage, outbox/retention
+workers, centralized telemetry, and load/failover/restore evidence remain
+required. No production-readiness or Brevo/Google-scale claim is made.
+
+## Phases 71–80 — SaaS platform and developer APIs
+
+**Status:** Research and phase design documents created; Phase 72 has a first
+database-isolation change, with implementation and full validation pending.
+
+**Implemented:** The repository already has a PostgreSQL-backed tenant and
+membership foundation, a Go control plane, mailbox-scoped authorization,
+REST/OpenAPI conventions, reserved SDK/CLI packages, and documented
+control/data-plane separation. These are foundations, not a complete SaaS
+platform.
+
+**Recommended architecture:** Reuse `tenants` as the organization/security
+boundary; use shared PostgreSQL with explicit tenant ownership and layered
+isolation as the initial default; consider workspaces only where delegated
+resource segmentation is needed. Use external OIDC identity, a bounded
+tenant-scoped permission model, provider-neutral asynchronous usage metering,
+managed edge protection, REST/OpenAPI as the canonical API, and generated
+SDKs. GraphQL remains additive and requires demonstrated product need.
+
+**Initial implementation:** Phase 72 migration `000014` prevents an inbound
+message from referencing a mailbox owned by another tenant; an opt-in
+PostgreSQL integration test covers the constraint. This is not a full tenant
+isolation guarantee.
+
+**Remaining implementation:** Phases 71–80 are documented individually under
+[`standards/`](standards/). Work must proceed in dependency order: approve
+architecture and tenant boundaries; implement/test data isolation; add
+organization/workspace lifecycle; production identity; RBAC; billing; edge
+gateway; durable REST resources; then decide/implement GraphQL and publish
+SDKs. Phases 81–100 have individual design documents; their implementation
+status follows below.
+
+**Why this remains open:** The repo has tenant, database, API, and security
+foundations but lacks production identity, general RBAC, organization/workspace
+workflows, billing policy/provider, deployment edge, and complete APIs. The
+recommended tenancy strategy still requires a reviewed architecture decision
+and comprehensive cross-tenant tests. Production readiness also requires
+deployment, operational, security, load, failure, and recovery evidence that
+cannot be established by source changes alone.
+
+## Phases 81–90 — Webhooks, eventing, templates, and compliance platform
+
+**Status:** Phase design documents added; Phase 81 has an isolated signing
+primitive; delivery/integration implementation remains pending.
+
+**Implemented:** The repository provides a PostgreSQL mailbox outbox with
+lease/ack/retry primitives, typed event envelopes, bounded mailbox filters
+and rules, a limited PostgreSQL mailbox search foundation, and an audit table.
+Phase 81 adds a Standard Webhooks-compatible HMAC signer in the Go API; it is
+not yet connected to endpoint secrets or outbound delivery.
+
+**Remaining implementation:** Phase 81 endpoint management, KMS-backed
+secrets, SSRF-safe dispatcher, retries/DLQ/replay; Phase 82 general event
+schemas, consumers, and measured broker decision; Phase 83 tenant templates
+and secure rendering; Phase 84 durable workflow/scheduler; Phase 85 prioritized
+provider integrations; Phase 86 resumable migration connectors; Phase 87
+global search and projection freshness; Phase 88 durable analytics; Phase 89
+scheduled/report exports; Phase 90 durable audit, privacy workflows, and
+applicable compliance evidence. Individual contracts and rationale are in
+[`standards/phase-81-webhook-system.md`](standards/phase-81-webhook-system.md)
+through [`standards/phase-90-audit-compliance.md`](standards/phase-90-audit-compliance.md).
+
+**Why this remains open:** Existing primitives are not production services:
+there are no running event/webhook consumers, KMS-backed webhook secrets,
+template/automation APIs, provider adapters, global search service, analytics
+warehouse, or report scheduler. Audit/compliance also requires operational
+controls and, where applicable, legal review and independent assurance.
+Source-level foundations alone cannot establish reliability, compliance, or
+Brevo/Google-scale capacity.
+
+## Phases 91–100 — White-label, extensions, administration, and enterprise release
+
+**Status:** Phase design documents added; Phase 91 has deployment-level
+dashboard branding; tenant-specific white-labeling and all other phase
+implementations remain pending.
+
+**Implemented:** The dashboard brand label and page metadata accept the
+public build-time `NEXT_PUBLIC_BRAND_NAME` setting, defaulting to `SMTP
+Platform`. This is deployment-wide branding only. The repository has no
+tenant hostname verification, custom login experience, tenant theme storage,
+or logo asset pipeline.
+
+**Remaining implementation:** Phase 91 verified custom application domains,
+tenant branding, safe asset management, and branded authentication; Phase 92
+reviewed/sandboxed extensions; Phase 93 durable tenant admin APIs/UI; Phase 94
+separate privileged operator access and support console; Phase 95 privacy-safe
+AI boundaries; Phase 96 preference-aware notification delivery; Phase 97
+support workflows; Phase 98 production-like availability/capacity/failover;
+Phase 99 security and resilience evidence; Phase 100 an actual scoped
+production release. Detailed contracts and rationale are in
+[`standards/phase-91-white-label-platform.md`](standards/phase-91-white-label-platform.md)
+through [`standards/phase-100-enterprise-saas-release.md`](standards/phase-100-enterprise-saas-release.md).
+
+**Why this remains open:** Phases 71–90 are not complete, and this phase set
+depends on their tenant isolation, durable APIs, production identity, audit,
+events, object storage, and operational controls. Building tenant-specific
+branding, global administration, marketplace code execution, AI processing,
+or support impersonation before those controls exist would create avoidable
+cross-tenant and sensitive-data risks. Production scalability and enterprise
+release also require a selected deployment target and external test/evidence.
+
+## Phases 101–110 — Enterprise security and high availability
+
+**Status:** Design documents added; initial code slices exist for Phases 101,
+102, 103, 105, and 110. Provider targets are selected for Keycloak OIDC, AWS
+KMS/Secrets Manager, and AWS EKS, but the latter two are not integrated or
+deployed. The phase set is not complete.
+
+**Initial implementation:** The API rejects the development identity adapter
+unless `APP_ENVIRONMENT` explicitly identifies development. Optional Keycloak
+OIDC access tokens are validated for signature, exact issuer, API audience,
+expiry, Keycloak bearer-token type, and bounded size; the issuer/subject must map to a pre-provisioned
+active PostgreSQL user and membership. Tenant selection is checked against
+that membership, and current fixed role scopes come from PostgreSQL, not token
+claims. Migration `000015` adds the identity issuer field. API responses have
+defensive browser/cache headers and bounded request headers. During graceful
+shutdown, readiness is withdrawn before the listener drains. Go tests cover
+the OIDC verifier and these safeguards; PostgreSQL-backed membership tests
+require an isolated database. Go vulnerability scanning is enforced in the
+security workflow; after upgrading to Go 1.26.10 and `golang.org/x/text`
+0.41.0, `govulncheck` reported no known vulnerabilities. This does not provide browser sessions, MFA
+policy enforcement, general RBAC/ABAC, workload identity, managed secrets,
+HSM, durable audit, or clustered HA.
+
+**Remaining implementation:** Phase 101 EKS workload identity and service
+trust; Phase 102 user provisioning/deprovisioning, browser OIDC/session
+lifecycle, MFA configuration evidence, and optional SAML; Phase 103 a reviewed
+complete role/policy matrix; Phase 104 AWS IAM roles, Secrets Manager, KMS,
+certificate lifecycle, and key-rotation/recovery tests; Phase 105 durable
+security audit and signed/SBOM release supply chain; Phase 106 actual EKS
+cluster/network/load-balancer deployment; Phase 107 production distributed
+mail protocol services; Phase 108 managed storage HA and restore; Phase 109
+safe clustered queue operation; Phase 110 production failover, rollouts,
+self-healing, SLOs, and recovery exercises. Detailed contracts, remaining
+rationale, and acceptance criteria are in
+[`standards/phase-101-zero-trust-service-identity.md`](standards/phase-101-zero-trust-service-identity.md)
+through [`standards/phase-110-failover-rollouts-self-healing.md`](standards/phase-110-failover-rollouts-self-healing.md).
+
+**Why this remains open:** The repository explicitly does not show Phases
+71–100 complete. Keycloak, AWS KMS/Secrets Manager, and EKS are selected, but
+the realm, AWS accounts/IAM, cluster, managed data services, on-call ownership,
+and failover evidence are not present. These change security boundaries and
+durability semantics, so they cannot be represented as finished by generic
+code changes.
+
+## Phases 111–120 — Scalability, performance, and observability
+
+**Status:** Phase designs added; a bounded API metrics enhancement is
+implemented; distributed scaling and centralized operations remain pending.
+
+**Implemented:** The Go API's process-local Prometheus exposition now includes
+a fixed-bucket HTTP request-duration histogram in seconds and an active-request
+gauge. It retains existing aggregate counters and status-class metrics. Labels
+do not include tenant IDs, request IDs, email addresses, message IDs, or raw
+paths. Focused tests cover active-request lifecycle, cumulative histogram
+buckets, and metric output.
+
+**Remaining implementation:** Phase 111 approved SLOs, representative workload
+profiles, and repeatable capacity evidence; Phase 112 measured cache use cases
+and a tenant-safe distributed cache; Phase 113 data-placement, partitioning,
+and shard migration design; Phase 114 horizontally operated queue workers and
+backpressure; Phase 115 fleet-wide rate limiting, safe autoscaling, and
+load/benchmark evidence; Phase 116 central metrics/log collection and
+retention; Phase 117 end-to-end trace propagation and export; Phase 118
+production dashboards, alerting, and external uptime checks; Phase 119
+centralized SMTP, mailbox, storage, and queue SLIs; Phase 120 historical
+capacity forecasting and validated anomaly detection. The detailed contracts,
+remaining rationale, and acceptance criteria are in
+[`standards/phase-111-scalability-architecture.md`](standards/phase-111-scalability-architecture.md)
+through
+[`standards/phase-120-capacity-planning-and-anomaly-detection.md`](standards/phase-120-capacity-planning-and-anomaly-detection.md).
+
+**Why this remains open:** The metrics are process-local, reset on restart, and
+not centrally aggregated. There is no production deployment, representative
+load evidence, multi-instance service operation, telemetry backend, alert
+ownership, or historical dataset. Phases 71–100 are not complete, and
+Phases 101–110 remain partial; tenant, identity, storage, queue, and HA
+contracts are prerequisites for several of these capabilities. Caching,
+sharding, distributed throttling, autoscaling, and automated anomaly response
+change consistency and failure behavior and require operational evidence.
+
+## Phases 121–130 — Disaster recovery, compliance, and enterprise governance
+
+**Status:** Phase designs added; local PostgreSQL backup checksum generation
+and verification are implemented; production recovery and governance remain
+pending.
+
+**Implemented:** The local PostgreSQL backup script writes a SHA-256 sidecar
+after a successful logical dump. `make verify-postgres-backup BACKUP=...`
+verifies that the dump matches its sidecar. This detects accidental
+modification or corruption only; it is not an authenticated manifest, a
+successful restore test, point-in-time recovery, a protected backup service,
+or cross-region disaster recovery.
+
+**Remaining implementation:** Phase 121 inventory, protected backup
+automation, restore validation; Phase 122 approved data-residency and
+cross-region replication; Phase 123 base backups/WAL archiving and measured
+PITR; Phase 124 fenced failover/failback and geo-redundant service; Phase 125
+business-owned, recurring recovery and continuity exercises; Phase 126
+framework applicability assessments and governance evidence; Phase 127
+legally reviewed retention, legal hold, and eDiscovery workflows; Phase 128
+durable tamper-evident audit and controlled evidence exports; Phase 129
+tenant-scoped enterprise administration and lifecycle; Phase 130 stable
+enterprise APIs and operational governance. Detailed contracts, remaining
+rationale, and acceptance criteria are in
+[`standards/phase-121-backup-integrity-and-recovery-inventory.md`](standards/phase-121-backup-integrity-and-recovery-inventory.md)
+through
+[`standards/phase-130-enterprise-apis-and-operational-governance.md`](standards/phase-130-enterprise-apis-and-operational-governance.md).
+
+**Why this remains open:** No production backup target, WAL archive, region,
+key-recovery procedure, tested RPO/RTO, or continuity team is configured.
+Compliance applicability depends on real customer data, geography, contracts,
+and organizational roles; legal holds and eDiscovery also require legal
+process and strict authorization. Phases 71–120 are not complete in the
+repository, while Phases 101–110 remain partial, so enterprise administration
+and compliance workflows must not be presented as complete or certified.
+
+## Phases 131–140 — AI-assisted email analysis and organization
+
+**Status:** Phase designs added; offline aggregate email-feature extraction is
+implemented; no AI model, provider, or automated mail decision is implemented.
+
+**Implemented:** The Rust shared-types crate exposes
+`extract_email_features` over the existing bounded MIME projection. It returns
+aggregate text/link/attachment/parser counts only and does not include raw
+addresses, subjects, filenames, URLs, body text, or attachment bytes. It makes
+no network requests, does not execute attachments, and does not produce a
+spam, phishing, malware, classification, or priority verdict. Unit tests cover
+counts, executable-like filename/media-type indicators, and absence of raw
+message values from the feature output.
+
+**Remaining implementation:** Phase 131 approved model gateway, privacy/data
+processing boundaries, evaluation, and asynchronous inference; Phase 132
+versioned feature schemas and production pipeline integration; Phase 133
+evaluated spam scoring and reversible quarantine; Phase 134 phishing
+signals/reputation and isolated SSRF-safe URL analysis; Phase 135 a maintained
+attachment scanner and isolated sandbox; Phase 136 privacy-reviewed link
+reputation; Phase 137 opt-in email classification; Phase 138 personalized,
+consent-based priority; Phase 139 reversible smart inbox views; Phase 140
+source-linked, evaluated conversation summaries and action extraction.
+Detailed scope, remaining rationale, and acceptance criteria are in
+[`standards/phase-131-ai-platform-foundation.md`](standards/phase-131-ai-platform-foundation.md)
+through
+[`standards/phase-140-conversation-intelligence.md`](standards/phase-140-conversation-intelligence.md).
+
+**Why this remains open:** The `smtp-ai` package is a placeholder, and there
+is no approved model provider, consent/data-use policy, labeled evaluation
+set, inference infrastructure, operational ownership, or retention boundary.
+Email contains sensitive content and untrusted instructions. Phases 71–130
+are also not complete in the repository; tenant isolation, durable storage,
+audit, HA, and privacy controls are prerequisites. AI scores must remain
+advisory until validated, and automated destructive or external actions must
+require ordinary authorization and human confirmation.
+
+## Phases 141–150 — AI assistance, language, and relationship insights
+
+**Status:** Phase designs added; a bounded review-only text suggestion
+contract is implemented; no AI inference, translation, entity, intent,
+sentiment, task, calendar, or contact-intelligence feature is operational.
+
+**Implemented:** The Rust shared-types crate now provides
+`DraftSuggestion` for bounded reply, compose-assistance, summary, or translation
+text with a kind, model-version provenance, and optional source message IDs.
+Construction rejects empty or oversized content, unsupported control
+characters, excessive/duplicate/nil source IDs, and invalid model-version
+metadata. The value represents an untrusted, user-reviewable suggestion; it
+does not authorize mailbox reads, sanitize markup, send mail, or invoke a
+provider. Unit tests cover valid construction and rejection boundaries.
+
+**Remaining implementation:** Phase 141 provider-backed reply generation and
+review UI; Phase 142 safe draft editing and reversible composer operations;
+Phase 143 source-linked summaries with factuality/omission evaluation; Phase
+144 confidence-aware language detection and standards-based translation;
+Phase 145 consented, access-controlled entity extraction and retention; Phase
+146 evaluated intent taxonomy; Phase 147 privacy/fairness-reviewed sentiment
+analysis; Phase 148 source-linked task candidates with explicit confirmation;
+Phase 149 RFC 5545 calendar parsing and user-approved calendar integrations;
+Phase 150 user-controlled, mailbox-scoped contact insights. Detailed
+contracts, remaining rationale, and acceptance criteria are in
+[`standards/phase-141-smart-reply-generation.md`](standards/phase-141-smart-reply-generation.md)
+through
+[`standards/phase-150-contact-relationship-intelligence.md`](standards/phase-150-contact-relationship-intelligence.md).
+
+**Why this remains open:** There is no approved AI provider, opt-in and
+retention policy, inference service, evaluation dataset, user interface, or
+authorized calendar/contact integration. These features process sensitive
+communications and may create consequential inferred data. Suggestions must
+remain review-only; calendar/task/send actions require explicit user
+confirmation and existing authorization. Earlier phases 71–140 are not
+verified complete, and their tenant, privacy, audit, threading, and storage
+controls are prerequisites.
+
+## Phases 151–160 — Semantic retrieval, AI operations, and governance
+
+**Status:** Phase designs added; a bounded in-memory cosine-ranking primitive
+is implemented; embedding generation, vector storage, model operations, and
+governed AI workflows remain pending.
+
+**Implemented:** The shared Rust crate exposes `semantic_search` over
+caller-supplied vectors. It bounds dimensions, candidate count, mailbox scope,
+and result count; rejects non-finite/zero vectors and malformed authorized
+candidates; filters by explicit tenant and mailbox IDs; produces deterministic
+cosine ranking; and returns IDs/scores only. It does not generate embeddings,
+load mail, persist vectors, or replace authorization. The caller must derive
+the permitted mailbox scope from the authoritative identity/permission
+system. Tests cover tenant/mailbox filtering, ranking/tie behavior, invalid
+inputs, and unauthorized rows.
+
+**Remaining implementation:** Phase 151 embedding model/index lifecycle and
+authorization-aware durable retrieval; Phase 152 consented recommendation
+pipeline; Phase 153 deterministic, auditable AI workflow execution; Phase 154
+permission-aware assistant and explicitly approved tools; Phase 155 model/
+prompt registry, evaluation gates, rollout and rollback; Phase 156 enforced
+inference privacy, provider controls, isolation and audit; Phase 157 quality,
+drift, latency and cost monitoring; Phase 158 consented, poisoning-resistant
+feedback and reviewed training; Phase 159 organization-level AI governance;
+Phase 160 production integration with stable interfaces and evidence.
+Detailed contracts, remaining rationale, and acceptance criteria are in
+[`standards/phase-151-ai-search-and-semantic-retrieval.md`](standards/phase-151-ai-search-and-semantic-retrieval.md)
+through
+[`standards/phase-160-unified-ai-intelligence-platform.md`](standards/phase-160-unified-ai-intelligence-platform.md).
+
+**Why this remains open:** There is no embedding/model provider, vector
+database, deployed AI runtime, authorized retrieval adapter, governance
+policy, evaluation corpus, or production AI operations. The in-memory ranking
+primitive is not semantic search until embeddings are produced and the index
+is integrated with durable, permission-filtered mailbox retrieval. Phases
+71–150 are not verified complete in the repository; tenant isolation, privacy,
+audit, model governance, and user controls remain prerequisites.
+
+## Phases 161–180 — Global infrastructure
+
+**Status:** Phase designs added; a provider-neutral regional topology
+configuration validator is implemented; no cloud infrastructure or
+multi-region service is deployed.
+
+**Implemented:** `shared-types::regional_topology` validates a proposed
+primary/standby topology, unique bounded region and availability-zone
+identifiers, and required service coverage. It is an offline configuration
+guardrail only. It does not provision AWS/EKS, verify real regions or AZs,
+check residency, perform health checks, route traffic, replicate data, or
+trigger failover.
+
+**Remaining implementation:** Phase 161 approved service/data topology and
+regional SLOs; Phase 162 independent regional clusters and deployment
+automation; Phase 163 managed DNS and mail-record operations; Phase 164
+residency-safe geo routing; Phase 165 protocol-aware global load balancing;
+Phase 166 hardened edge ingress; Phase 167 safe static/private CDN delivery;
+Phase 168 encrypted object storage replication and reconciliation; Phase 169
+fenced database replication; Phase 170 regional cache policy; Phase 171
+durable distributed queues; Phase 172 authenticated service discovery; Phase
+173 production DR workflows; Phase 174 proven failover/failback; Phase 175
+isolated multi-region backup; Phase 176 resilience testing; Phase 177 measured
+traffic optimization; Phase 178 verified regional data residency; Phase 179
+central operations and alerting; and Phase 180 approved global production
+validation. Detailed contracts, remaining rationale, and acceptance criteria
+are in
+[`standards/phase-161-global-infrastructure-architecture.md`](standards/phase-161-global-infrastructure-architecture.md)
+through
+[`standards/phase-180-global-production-validation.md`](standards/phase-180-global-production-validation.md).
+
+**Why this remains open:** The immediate target is a localhost development
+environment on the user's Ubuntu laptop; cloud infrastructure is intentionally
+deferred because hosting budget and provider requirements are not available.
+There is no AWS account, regions, clusters, network, DNS, edge endpoints,
+managed database, object storage, global telemetry, or operations ownership
+configured. Local development does not need these hosted capabilities.
+Phases 71–160 are also not verified complete in the repository; tenant
+isolation, data residency, audit, AI privacy, stateful HA, and recovery
+contracts remain prerequisites. Multi-region mail is especially sensitive to
+single-writer ownership, queue deduplication, SMTP reputation, DNS caching,
+and regulatory placement; it cannot be claimed complete by topology code or
+documents alone.

@@ -54,8 +54,11 @@ development uses an explicitly enabled `CONTROL_PLANE_DEV_MODE` principal
 adapter; it is not a production authentication system. Domain registration,
 pending verification state, scoped one-time API keys, revocation, audit
 events, and tenant authorization are implemented. OIDC, SMTP AUTH
-credentials, Go-to-queue message submission, and persisted delivery read
-models remain deferred rather than being represented as fake functionality.
+credentials, SMTP-protocol submission, and persisted delivery read models
+remain deferred. The dashboard now uses a same-origin API proxy and can submit
+plain-text messages through a scoped HTTP endpoint into the durable PostgreSQL
+queue. The local worker still simulates outcomes and does not send external
+email; queue acceptance is not delivery.
 
 Milestone 5 adds an opt-in inbound reception path in
 `smtp-session/src/inbound.rs`. It routes only to active mailboxes on

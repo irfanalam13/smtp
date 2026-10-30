@@ -49,3 +49,15 @@ It is **not** a production-ready hosted SMTP platform.
 4. Run CI secret scanning and inspect branch/release protections.
 5. Execute representative concurrent performance and failure testing.
 6. Re-run this matrix after each blocker is resolved.
+
+## Validation update — 2026-10-29
+
+- The Go API now has an optional Keycloak OIDC bearer-token verifier and
+  database-backed membership resolution. Browser sessions and user
+  provisioning remain incomplete.
+- `govulncheck` v1.9.0 reported no known reachable Go vulnerabilities after
+  upgrading the toolchain to Go 1.26.10 and `golang.org/x/text` to 0.41.0.
+- Go race tests, `go vet`, and `go build` passed for the API.
+- PostgreSQL-backed OIDC membership and migration `000015` were not executed
+  because `TEST_DATABASE_URL` was unavailable. The original RustSec findings
+  and production-readiness limitations remain open.

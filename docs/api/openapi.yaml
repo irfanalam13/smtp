@@ -3,15 +3,17 @@ info:
   title: SMTP Platform Control Plane API
   version: 1.0.0
   description: >
-    Tenant-scoped development control-plane API. Production OIDC authentication
-    and durable Go-to-queue submission are intentionally not enabled yet.
+    Tenant-scoped control-plane API. Authentication uses durable PostgreSQL
+    API keys or optional Keycloak OIDC access tokens for pre-provisioned users.
+    OIDC users with multiple tenant memberships must select one using
+    X-Tenant-ID; membership is always resolved from PostgreSQL.
 servers:
   - url: http://localhost:8080
 security:
   - bearerAuth: []
 tags:
   - name: Control plane
-    description: Tenant-scoped development control-plane operations.
+    description: Tenant-scoped control-plane operations; some non-mailbox state remains in-memory.
 paths:
   /v1/me:
     get:
@@ -19,6 +21,7 @@ paths:
       tags: [Control plane]
       responses:
         "200": { description: Principal and tenant role, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
   /v1/tenants/current:
     get:
@@ -26,10 +29,12 @@ paths:
       tags: [Control plane]
       responses:
         "200": { description: Tenant summary, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
   /v1/domains:
     get:
       summary: List tenant domains
+      description: Durable authenticated accounts read domains from PostgreSQL; the local development principal uses process-local state.
       tags: [Control plane]
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -39,6 +44,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
     post:
       summary: Register a pending domain
+      description: Durable authenticated accounts store domains in PostgreSQL; the local development principal uses process-local state.
       tags: [Control plane]
       requestBody:
         required: true
@@ -60,6 +66,7 @@ paths:
       tags: [Control plane]
       responses:
         "200": { description: API-key metadata; secret is never returned }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
     post:
       summary: Create an API key; secret is returned once
       tags: [Control plane]
@@ -77,6 +84,7 @@ paths:
                 expires_at: { type: string, format: date-time, nullable: true }
       responses:
         "201": { description: One-time secret response }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
   /v1/api-keys/{id}/revoke:
     post:
       summary: Revoke an API key
@@ -84,38 +92,56 @@ paths:
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
         "200": { description: Revoked }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
         "404": { description: Not found without cross-tenant enumeration }
   /v1/domains/{id}/verification:
     post:
       summary: Create a DNS verification challenge
+      description: Durable authenticated accounts persist the challenge and verification state in PostgreSQL.
       tags: [Control plane]
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
         "201": { description: Verification record and one-time challenge secret }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
   /v1/domains/{id}/verification/check:
     post:
       summary: Check a DNS verification challenge
+      description: Checks the TXT record at _smtp-platform-verification.<domain> and persists successful verification for durable accounts.
       tags: [Control plane]
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
         "200": { description: Verification status }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
   /v1/mailboxes:
     get:
-      summary: List tenant mailboxes
+      summary: List mailboxes readable by the authenticated tenant member
       tags: [Control plane]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
       responses:
-        "200": { description: Bounded mailbox list }
+        "200": { description: Bounded mailboxes readable by this tenant member }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The principal lacks user-bound mailbox permissions }
+        "503": { description: PostgreSQL is temporarily unavailable }
   /v1/mailboxes/{mailbox_id}/messages:
     get:
       summary: List mailbox message metadata
       tags: [Control plane]
-      parameters: [{ name: mailbox_id, in: path, required: true, schema: { type: string } }]
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string } }
+        - $ref: "#/components/parameters/Limit"
       responses:
         "200": { description: Bounded message metadata without raw bodies }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Missing delivery scope or user-bound key }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { description: PostgreSQL is temporarily unavailable }
   /v1/mailboxes/{mailbox_id}/messages/{message_id}:
     get:
       summary: Get one message metadata
@@ -125,7 +151,11 @@ paths:
         - { name: message_id, in: path, required: true, schema: { type: string } }
       responses:
         "200": { description: Message metadata }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Missing delivery scope or user-bound key }
         "404": { description: Non-enumerating not found response }
+        "503": { description: PostgreSQL is temporarily unavailable }
   /v1/domains/{id}/checks:
     post:
       summary: Run bounded DNS diagnostics for a tenant domain
@@ -133,20 +163,97 @@ paths:
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
         "200": { description: Advisory SPF, DMARC, MX, and ownership results }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
         "429": { description: Check rate limit }
   /v1/domains/{id}/readiness:
     get:
-      summary: Get cached domain readiness
+      summary: Get the most recent domain readiness result
+      description: DNS diagnostics are cached in process memory and reset on API restart.
       tags: [Control plane]
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
         "200": { description: Explicit ready, degraded, action_required, or checking state }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
   /v1/usage:
     get:
       summary: Get current tenant message usage window
       tags: [Control plane]
       responses:
         "200": { description: Tenant-scoped usage and configured limit }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+  /v1/submissions:
+    get:
+      summary: List recent messages submitted by this tenant through the API
+      description: Returns queue states, not proof of remote delivery.
+      tags: [Control plane]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { description: Recent tenant-scoped submissions, content: { application/json: { schema: { $ref: "#/components/schemas/SubmissionListResponse" } } } }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Missing delivery:write scope or sender domain is not verified }
+        "503": { description: Queue storage is temporarily unavailable }
+    post:
+      summary: Submit a plain-text message to the durable queue
+      description: Queue acceptance does not mean the message was delivered. Durable accounts must use a sender address on a verified tenant domain; external delivery remains disabled in the local development worker.
+      tags: [Control plane]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256, pattern: "^[A-Za-z0-9._:-]+$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmissionRequest"
+      responses:
+        "202": { description: Accepted into the durable queue, content: { application/json: { schema: { $ref: "#/components/schemas/SubmissionAccepted" } } } }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { description: Submission request exceeds the configured size limit }
+        "503": { description: Queue storage is temporarily unavailable }
+  /v1/submissions/{id}/attempts:
+    get:
+      summary: List tenant-scoped queue attempts for a submission
+      description: Returns recorded queue attempts, which may be simulated in development and do not prove external SMTP delivery.
+      tags: [Control plane]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Queue attempts in attempt order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, attempt_number, started_at, outcome]
+                      properties:
+                        id: { type: integer, format: int64 }
+                        attempt_number: { type: integer, minimum: 1 }
+                        started_at: { type: string, format: date-time }
+                        finished_at: { type: string, format: date-time, nullable: true }
+                        outcome: { type: string, enum: [simulated_success, failure] }
+                        error_category: { type: string, nullable: true }
+                        diagnostic: { type: string, nullable: true }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { description: Queue activity storage is temporarily unavailable }
 components:
   parameters:
     Limit:
@@ -156,7 +263,7 @@ components:
       schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
   responses:
     InvalidRequest:
-      description: Invalid request or query
+      description: Invalid request/query or an OIDC user's required tenant selection is missing
       content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
     Unauthorized:
       description: Authentication required
@@ -171,6 +278,48 @@ components:
       description: Resource not found
       content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
   schemas:
+    SubmissionRequest:
+      type: object
+      additionalProperties: false
+      required: [from, to, text]
+      properties:
+        from: { type: string, format: email, maxLength: 320 }
+        to:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { type: string, format: email, maxLength: 320 }
+        subject: { type: string, maxLength: 900 }
+        text:
+          type: string
+          description: Plain-text body. The generated RFC 5322 message, including headers, must not exceed 10 MiB.
+    Submission:
+      type: object
+      required: [id, from, to, subject, status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        from: { type: string, format: email }
+        to: { type: array, items: { type: string, format: email } }
+        subject: { type: string }
+        status:
+          type: string
+          enum: [queued, processing, retry_scheduled, simulated_succeeded, terminal_failed]
+        created_at: { type: string, format: date-time }
+    SubmissionListResponse:
+      type: object
+      required: [items, next_page]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Submission" }
+        next_page: { nullable: true }
+    SubmissionAccepted:
+      type: object
+      required: [submission, created, message]
+      properties:
+        submission: { $ref: "#/components/schemas/Submission" }
+        created: { type: boolean }
+        message: { type: string }
     ErrorResponse:
       type: object
       required: [error]
@@ -192,3 +341,8 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
+      bearerFormat: API key or JWT access token
+      description: >
+        Supply a durable API key or a Keycloak OIDC access token when OIDC is
+        configured. For OIDC users with multiple active memberships, specify
+        X-Tenant-ID; the selected membership is verified from PostgreSQL.

@@ -1,36 +1,38 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SMTP Platform dashboard
 
-## Getting Started
+The Next.js dashboard provides a browser UI for the Go control-plane API:
 
-First, run the development server:
+- domain registration, TXT verification, and DNS diagnostics;
+- API-key creation/revocation and mailbox metadata access;
+- plain-text message submission and recent durable queue state.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Run the API and PostgreSQL first, then start the dashboard from the repository
+root:
+
+```sh
+pnpm dev:dashboard
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The UI is available at `http://127.0.0.1:3000`. API requests use the same-origin
+`/api/backend/*` rewrite, which forwards to `API_URL` (default
+`http://127.0.0.1:8080`). Set `API_URL` on the dashboard server when the API
+runs elsewhere; it is server-side configuration, not a browser secret.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+In a development build, the dashboard sends the local development principal
+when no bearer token is supplied. Otherwise, paste a user-bound API key or
+OIDC access token into the connection field. Tokens are held in memory only
+and cleared on refresh. `X-Tenant-ID` can select an active membership for
+multi-tenant OIDC users.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Submissions require `delivery:write` and are stored in the durable PostgreSQL
+queue. Durable accounts must verify the sender domain with its TXT challenge;
+the local development principal uses process-local domain state. Usage counters
+remain process-local. The current development worker simulates processing and
+does not send external email. The dashboard does not claim delivery or mailbox
+placement.
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The dashboard's App Router composition, control-plane feature ownership,
+client/server boundaries, and import conventions are documented in
+[`docs/frontend/architecture.md`](../docs/frontend/architecture.md),
+[`docs/frontend/folder-conventions.md`](../docs/frontend/folder-conventions.md),
+and [`docs/frontend/import-conventions.md`](../docs/frontend/import-conventions.md).

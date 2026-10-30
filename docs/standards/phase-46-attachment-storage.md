@@ -41,6 +41,12 @@ metadata transactions, signed expiring downloads, HTTP range controls, audit
 events, retention/legal hold, key rotation/re-encryption, and failure/load
 testing.
 
+**Why this remains open:** The current implementation keeps attachment data
+and key material in process memory, so restart loses state and whole-object
+buffering limits scale. A durable download service also needs persistent
+authorization, scanning, retention, and key lifecycle rather than only a
+working reference-store algorithm.
+
 ## Acceptance criteria
 
 - A chunk retry cannot reorder or duplicate content; abandoned uploads expire.

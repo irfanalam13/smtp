@@ -30,6 +30,12 @@ state. The query function has a bounded limit and offset. There is no
 projection worker, result cache, query plan corpus, incremental update
 pipeline, distributed backend, or observed performance baseline yet.
 
+**Why this remains open:** There is not yet a representative production corpus,
+tenant distribution, or latency target against which to justify caches,
+reindex throttles, or distributed search. Optimization should follow measured
+query plans and load evidence to avoid adding complexity without demonstrated
+benefit.
+
 ## Acceptance criteria
 
 - `EXPLAIN ANALYZE` shows expected indexes under realistic data distributions.

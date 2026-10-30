@@ -31,6 +31,11 @@ message disposition/quarantine behavior, attachment scanner integration,
 encoded-word/address edge coverage, and an asynchronous durable projection
 writer. The parser is not an SMTP acceptor or a claim of full RFC conformance.
 
+**Why this remains open:** Parsing is currently a bounded component, not a
+production ingestion pipeline. It must be connected asynchronously to durable
+message storage and attachment scanning, with resource isolation and malformed
+input coverage, before its projections can be trusted by mailbox features.
+
 ## Acceptance criteria
 
 - Nested multipart/alternative, multipart/related, mixed, and encapsulated

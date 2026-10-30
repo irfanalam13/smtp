@@ -25,6 +25,11 @@ Still required: classifier decision integration, public review/reporting APIs,
 scheduled expiration, retention/legal review, and abuse-resistant audit
 controls. Repository moves and sync records are transactional.
 
+**Why this remains open:** Repository operations do not classify messages or
+schedule expiry, and no user-facing review workflow is connected. Classification
+and cleanup must preserve review, audit, and legal-hold behavior rather than
+turning a stored verdict into automatic irreversible deletion.
+
 ## Acceptance criteria
 
 - Quarantined mail is isolated from normal delivery and search by explicit

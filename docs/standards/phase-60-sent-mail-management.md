@@ -1,6 +1,6 @@
 # Phase 60 — Sent Mail Management
 
-Status: **Permission-checked submission and idempotent recipient event repository operations implemented; SMTP/DSN integration pending**
+Status: **HTTP submissions reach the durable queue; sent-copy and SMTP/DSN integration remain pending**
 
 ## Research and contract
 
@@ -18,12 +18,20 @@ the existing queue/DSN identifiers and avoid duplicating transport logic.
 
 Migration `000010` adds sent-submission and per-recipient event projections,
 with constrained states and idempotency keys. Repository methods persist
-submissions and idempotent recipient events with derived status. They do not
-yet write Sent messages, consume queue events, or change outbound delivery.
+submissions and idempotent recipient events with derived status. The
+tenant-scoped HTTP submission endpoint now enqueues plain-text messages
+atomically with recipients and an idempotency record. It does not yet write
+Sent messages, consume queue events, or change outbound delivery.
 
-Still required: SMTP/API submission integration and sent-copy transaction,
+Still required: SMTP submission integration and sent-copy transaction,
 durable queue/DSN event consumer, recipient privacy/retention controls,
-authenticated synchronization APIs, and end-to-end failure tests.
+authenticated synchronization APIs, and end-to-end delivery failure tests.
+
+**Why this remains open:** The HTTP submission endpoint only records durable
+queue acceptance. It is not connected to SMTP AUTH/outbound delivery, sent
+copies, or durable queue/DSN events. Until those adapters are wired, the
+platform cannot consistently create a sent copy or distinguish accepted,
+queued, and delivered outcomes.
 
 ## Acceptance criteria
 
