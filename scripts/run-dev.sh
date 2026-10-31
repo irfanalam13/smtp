@@ -37,7 +37,7 @@ source .env
 set +a
 
 : "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-: "${POSTGRES_HOST_PORT:=5432}"
+: "${POSTGRES_HOST_PORT:=5434}"
 : "${DATABASE_URL:=postgres://smtp_dev:${POSTGRES_PASSWORD}@localhost:${POSTGRES_HOST_PORT}/smtp_platform?sslmode=disable}"
 : "${API_ADDR:=127.0.0.1:8080}"
 : "${MAILBOX_SERVICE_ADDR:=127.0.0.1:8081}"
@@ -67,10 +67,19 @@ if [[ "$worker_enabled" == true && "${SMTP_DELIVERY_ENABLED:-false}" != "true" ]
 fi
 if [[ "$worker_enabled" == true && -z "${SMTP_RELAY_HOST:-}" && -z "${SMTP_DELIVERY_ALLOWLIST:-}" ]]; then
   printf 'The outbound worker requires SMTP_DELIVERY_ALLOWLIST in .env.\n' >&2
-  printf 'For Gmail/Brevo delivery, configure SMTP_RELAY_* settings instead.\n' >&2
+  printf 'For relay delivery, configure SMTP_RELAY_* settings instead.\n' >&2
   exit 1
 fi
-if [[ "$worker_enabled" == true &&
+local_mailpit=false
+if [[ "$APP_ENVIRONMENT" == "development" &&
+  "${SMTP_RELAY_HOST:-}" == "127.0.0.1" &&
+  "${SMTP_RELAY_PORT:-}" == "1025" &&
+  -z "${SMTP_RELAY_USERNAME:-}" &&
+  -z "${SMTP_RELAY_PASSWORD:-}" &&
+  -n "${SMTP_RELAY_FROM:-}" ]]; then
+  local_mailpit=true
+fi
+if [[ "$worker_enabled" == true && "$local_mailpit" != true &&
   ( -n "${SMTP_RELAY_HOST:-}" || -n "${SMTP_RELAY_PORT:-}" ||
     -n "${SMTP_RELAY_USERNAME:-}" || -n "${SMTP_RELAY_PASSWORD:-}" ||
     -n "${SMTP_RELAY_FROM:-}" ) ]]; then

@@ -240,6 +240,7 @@ func TestSubmissionHandlerRequiresWriteScopeAndIdempotencyKey(t *testing.T) {
 }
 
 func TestSendingConfigReportsRelayReadinessWithoutReturningCredentials(t *testing.T) {
+	t.Setenv("APP_ENVIRONMENT", "production")
 	t.Setenv("SMTP_DELIVERY_ENABLED", "true")
 	t.Setenv("SMTP_RELAY_HOST", "smtp.example.test")
 	t.Setenv("SMTP_RELAY_PORT", "587")
@@ -260,6 +261,45 @@ func TestSendingConfigReportsRelayReadinessWithoutReturningCredentials(t *testin
 		strings.Contains(response.Body.String(), "private-login") ||
 		strings.Contains(response.Body.String(), "private-password") {
 		t.Fatalf("sending config leaked credentials or omitted readiness: %s", response.Body)
+	}
+}
+
+func TestLocalMailpitRelayReadinessIsDevelopmentOnly(t *testing.T) {
+	t.Setenv("SMTP_DELIVERY_ENABLED", "true")
+	t.Setenv("SMTP_RELAY_HOST", "127.0.0.1")
+	t.Setenv("SMTP_RELAY_PORT", "1025")
+	t.Setenv("SMTP_RELAY_USERNAME", "")
+	t.Setenv("SMTP_RELAY_PASSWORD", "")
+	t.Setenv("SMTP_RELAY_FROM", "sender@example.test")
+
+	t.Setenv("APP_ENVIRONMENT", "development")
+	if !smtpRelayReady() {
+		t.Fatal("local unauthenticated Mailpit relay should be ready in development")
+	}
+
+	t.Setenv("APP_ENVIRONMENT", "production")
+	if smtpRelayReady() {
+		t.Fatal("local unauthenticated Mailpit relay must not be ready in production")
+	}
+
+	t.Setenv("APP_ENVIRONMENT", "development")
+	t.Setenv("SMTP_RELAY_HOST", "localhost")
+	if smtpRelayReady() {
+		t.Fatal("Mailpit relay must require the explicit loopback address")
+	}
+}
+
+func TestSubmissionDeliveryModeSupportsDirectMXWithoutRelayCredentials(t *testing.T) {
+	t.Setenv("SMTP_DELIVERY_ENABLED", "true")
+	t.Setenv("SMTP_RELAY_HOST", "")
+	t.Setenv("SMTP_RELAY_PORT", "")
+	t.Setenv("SMTP_RELAY_USERNAME", "")
+	t.Setenv("SMTP_RELAY_PASSWORD", "")
+	t.Setenv("SMTP_RELAY_FROM", "")
+	t.Setenv("SMTP_DELIVERY_ALLOWLIST", "example.test")
+	t.Setenv("SMTP_DKIM_KEY_DIR", "/run/secrets/dkim")
+	if got := submissionDeliveryMode(); got != "direct_mx" {
+		t.Fatalf("direct-MX mode=%q, want direct_mx", got)
 	}
 }
 
@@ -410,15 +450,21 @@ func TestPostgreSQLSubmissionQueueIntegration(t *testing.T) {
 	}
 	var schemaVersion int16
 	var parsedMetadata map[string]any
+	var queuedTenantID, senderDomain, deliveryMode, dkimKeyRef string
 	if err := pool.QueryRow(ctx, `
-		SELECT message_schema_version, parsed_metadata
+		SELECT message_schema_version, parsed_metadata, tenant_id::text,
+		       sender_domain, delivery_mode, dkim_key_ref
 		FROM mail_messages WHERE id = $1
-	`, first.ID).Scan(&schemaVersion, &parsedMetadata); err != nil {
+	`, first.ID).Scan(&schemaVersion, &parsedMetadata, &queuedTenantID, &senderDomain, &deliveryMode, &dkimKeyRef); err != nil {
 		t.Fatalf("read canonical queued metadata: %v", err)
 	}
 	if schemaVersion != 1 || parsedMetadata["subject"] != submission.Subject ||
 		parsedMetadata["message_id"] != first.ID+"@smtp-platform.local" {
 		t.Fatalf("canonical queued metadata=%#v schema=%d", parsedMetadata, schemaVersion)
+	}
+	if queuedTenantID != principal.TenantID || senderDomain != "example.test" ||
+		deliveryMode != "direct_mx" || dkimKeyRef != "secret-manager://dkim/example.test" {
+		t.Fatalf("queued tenant delivery metadata=%q %q %q %q", queuedTenantID, senderDomain, deliveryMode, dkimKeyRef)
 	}
 	var deliveryID int64
 	if err := pool.QueryRow(ctx, `

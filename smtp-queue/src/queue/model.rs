@@ -205,7 +205,13 @@ pub struct ClaimedJob {
 #[derive(Clone, Debug)]
 pub struct ClaimedDeliveryBatch {
     pub message_id: MessageId,
+    /// Tenant and DKIM references are identifiers only; private key material
+    /// never enters the queue.
+    pub tenant_id: Option<Uuid>,
     pub envelope_sender: String,
+    pub sender_domain: Option<String>,
+    pub delivery_mode: String,
+    pub dkim_key_ref: Option<String>,
     pub recipients: Vec<String>,
     pub destination_domain: String,
     pub raw_message: Vec<u8>,

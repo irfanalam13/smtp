@@ -20,6 +20,8 @@ if [[ ! -f .env ]]; then
   cp .env.example .env
   password="$(openssl rand -hex 24)"
   sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$password/" .env
+  database_url="postgres://smtp_dev:${password}@localhost:5434/smtp_platform?sslmode=disable"
+  sed -i "s|^DATABASE_URL=.*|DATABASE_URL=$database_url|" .env
   printf 'Created .env with a generated local PostgreSQL password.\n'
 fi
 
@@ -57,7 +59,7 @@ for attempt in {1..30}; do
   sleep 1
 done
 
-export DATABASE_URL="${DATABASE_URL:-postgres://smtp_dev:${POSTGRES_PASSWORD}@localhost:5432/smtp_platform?sslmode=disable}"
+export DATABASE_URL="${DATABASE_URL:-postgres://smtp_dev:${POSTGRES_PASSWORD}@localhost:${POSTGRES_HOST_PORT:-5434}/smtp_platform?sslmode=disable}"
 make migrate-up
 cargo build --workspace
 (cd smtp-api && go build ./...)

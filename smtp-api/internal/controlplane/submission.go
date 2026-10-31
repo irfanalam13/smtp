@@ -290,9 +290,37 @@ func (h Handler) sendingConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	from := strings.TrimSpace(os.Getenv("SMTP_RELAY_FROM"))
 	JSON(w, http.StatusOK, map[string]any{
-		"relay_ready": smtpRelayReady(),
-		"from":        from,
+		"relay_ready":   smtpRelayReady(),
+		"delivery_mode": submissionDeliveryMode(),
+		"from":          from,
 	})
+}
+
+// submissionDeliveryMode is deliberately server-only: callers cannot choose a
+// transport. This prevents a direct-MX failure from becoming an implicit relay.
+func submissionDeliveryMode() string {
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("SMTP_DELIVERY_ENABLED")), "true") {
+		return ""
+	}
+	if smtpRelayReady() {
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENVIRONMENT")), "development") &&
+			strings.TrimSpace(os.Getenv("SMTP_RELAY_HOST")) == "127.0.0.1" &&
+			strings.TrimSpace(os.Getenv("SMTP_RELAY_PORT")) == "1025" {
+			return "mailpit"
+		}
+		return "relay"
+	}
+	// A direct-MX deployment must not carry a partial relay configuration.
+	for _, name := range []string{"SMTP_RELAY_HOST", "SMTP_RELAY_PORT", "SMTP_RELAY_USERNAME", "SMTP_RELAY_PASSWORD", "SMTP_RELAY_FROM"} {
+		if strings.TrimSpace(os.Getenv(name)) != "" {
+			return ""
+		}
+	}
+	if strings.TrimSpace(os.Getenv("SMTP_DELIVERY_ALLOWLIST")) == "" ||
+		strings.TrimSpace(os.Getenv("SMTP_DKIM_KEY_DIR")) == "" {
+		return ""
+	}
+	return "direct_mx"
 }
 
 func smtpRelayReady() bool {
@@ -301,13 +329,22 @@ func smtpRelayReady() bool {
 	username := os.Getenv("SMTP_RELAY_USERNAME")
 	password := os.Getenv("SMTP_RELAY_PASSWORD")
 	from := strings.TrimSpace(os.Getenv("SMTP_RELAY_FROM"))
-	return strings.EqualFold(strings.TrimSpace(os.Getenv("SMTP_DELIVERY_ENABLED")), "true") &&
-		validRelayHostname(host) &&
-		(err == nil && (port == 465 || port == 587)) &&
+	if err != nil {
+		return false
+	}
+	localMailpit := strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENVIRONMENT")), "development") &&
+		host == "127.0.0.1" &&
+		port == 1025 &&
+		username == "" &&
+		password == ""
+	authenticatedRelay := validRelayHostname(host) &&
+		(port == 465 || port == 587) &&
 		username != "" && len(username) <= 512 &&
 		password != "" && len(password) <= 512 &&
 		len(username)+len(password)+2 <= 360 &&
-		strings.IndexFunc(username+password, unicode.IsControl) < 0 &&
+		strings.IndexFunc(username+password, unicode.IsControl) < 0
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("SMTP_DELIVERY_ENABLED")), "true") &&
+		(localMailpit || authenticatedRelay) &&
 		validSubmissionAddress(from)
 }
 
@@ -352,8 +389,9 @@ func (h Handler) submit(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusBadRequest, "invalid_request", "Idempotency-Key must be 1-256 ASCII letters, numbers, or - _ . :")
 		return
 	}
-	if !smtpRelayReady() {
-		Error(w, http.StatusServiceUnavailable, "smtp_relay_unavailable", "authenticated SMTP delivery is not configured")
+	deliveryMode := submissionDeliveryMode()
+	if deliveryMode == "" {
+		Error(w, http.StatusServiceUnavailable, "delivery_unavailable", "SMTP delivery is not configured")
 		return
 	}
 
@@ -373,17 +411,12 @@ func (h Handler) submit(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusBadRequest, "invalid_submission", "sender, recipients, subject, or message body is invalid")
 		return
 	}
-	relayFrom := strings.TrimSpace(os.Getenv("SMTP_RELAY_FROM"))
-	if !strings.EqualFold(submission.From, relayFrom) {
-		Error(w, http.StatusForbidden, "sender_not_authorized", "sender must match the configured SMTP relay sender")
-		return
-	}
 	if h.Postgres == nil {
 		Error(w, http.StatusServiceUnavailable, "submission_unavailable", "durable message queue is unavailable")
 		return
 	}
-	item, created, err := h.Postgres.EnqueueSubmissionWithRelaySender(
-		r.Context(), principal, idempotencyKey, submission, relayFrom,
+	item, created, err := h.Postgres.EnqueueSubmissionWithDelivery(
+		r.Context(), principal, idempotencyKey, submission, deliveryMode,
 	)
 	switch {
 	case errors.Is(err, errIdempotencyConflict):
@@ -400,6 +433,12 @@ func (h Handler) submit(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusServiceUnavailable, "submission_unavailable", "message could not be added to the queue")
 		return
 	}
+	slog.Info("message submission enqueued",
+		"request_id", w.Header().Get(requestIDHeader),
+		"message_id", item.ID,
+		"created", created,
+		"recipient_count", len(item.To)+len(item.Cc)+len(item.Bcc),
+	)
 	JSON(w, http.StatusAccepted, map[string]any{
 		"submission": item,
 		"created":    created,

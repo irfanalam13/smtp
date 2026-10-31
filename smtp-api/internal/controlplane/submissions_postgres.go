@@ -17,9 +17,7 @@ func (repository *PostgreSQLRepository) EnqueueSubmission(
 	idempotencyKey string,
 	submission normalizedSubmission,
 ) (Submission, bool, error) {
-	return repository.EnqueueSubmissionWithRelaySender(
-		ctx, principal, idempotencyKey, submission, "",
-	)
+	return repository.EnqueueSubmissionWithDelivery(ctx, principal, idempotencyKey, submission, "direct_mx")
 }
 
 func (repository *PostgreSQLRepository) EnqueueSubmissionWithRelaySender(
@@ -27,7 +25,32 @@ func (repository *PostgreSQLRepository) EnqueueSubmissionWithRelaySender(
 	principal Principal,
 	idempotencyKey string,
 	submission normalizedSubmission,
-	relayFrom string,
+	_ string,
+) (Submission, bool, error) {
+	return repository.enqueueSubmission(ctx, principal, idempotencyKey, submission, "relay")
+}
+
+// EnqueueSubmissionWithDelivery records the selected transport with the queued
+// message. The value is selected from server configuration, never from client input.
+func (repository *PostgreSQLRepository) EnqueueSubmissionWithDelivery(
+	ctx context.Context,
+	principal Principal,
+	idempotencyKey string,
+	submission normalizedSubmission,
+	deliveryMode string,
+) (Submission, bool, error) {
+	if deliveryMode != "direct_mx" && deliveryMode != "relay" && deliveryMode != "mailpit" {
+		return Submission{}, false, ErrInvalid
+	}
+	return repository.enqueueSubmission(ctx, principal, idempotencyKey, submission, deliveryMode)
+}
+
+func (repository *PostgreSQLRepository) enqueueSubmission(
+	ctx context.Context,
+	principal Principal,
+	idempotencyKey string,
+	submission normalizedSubmission,
+	deliveryMode string,
 ) (Submission, bool, error) {
 	scope := "api:" + principal.TenantID
 	if scope == "api:" || len(scope) > 128 || !validIdempotencyKey(idempotencyKey) {
@@ -70,19 +93,22 @@ func (repository *PostgreSQLRepository) EnqueueSubmissionWithRelaySender(
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return Submission{}, false, fmt.Errorf("look up submission idempotency key: %w", err)
 	}
-	if principal.durable && !strings.EqualFold(submission.From, relayFrom) {
+	if principal.durable {
 		if err := requireVerifiedSenderDomain(ctx, tx, principal, submission.From); err != nil {
 			return Submission{}, false, err
 		}
 	}
+	senderDomain := strings.ToLower(submission.From[strings.LastIndexByte(submission.From, '@')+1:])
+	dkimKeyRef := "secret-manager://dkim/" + senderDomain
 
 	now := time.Now().UTC()
 	var messageID string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO mail_messages (id, envelope_sender, body, body_size, created_at)
-		VALUES (gen_random_uuid(), $1, '', 0, $2)
+		INSERT INTO mail_messages
+		  (id, envelope_sender, body, body_size, tenant_id, sender_domain, delivery_mode, dkim_key_ref, created_at)
+		VALUES (gen_random_uuid(), $1, '', 0, $2, $3, $4, $5, $6)
 		RETURNING id::text
-	`, submission.From, now).Scan(&messageID); err != nil {
+	`, submission.From, principal.TenantID, senderDomain, deliveryMode, dkimKeyRef, now).Scan(&messageID); err != nil {
 		return Submission{}, false, fmt.Errorf("allocate queued submission: %w", err)
 	}
 	body := submissionMessage(submission, messageID, now)

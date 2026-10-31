@@ -31,9 +31,11 @@ copy untracked. `POSTGRES_PASSWORD` is required by Compose. `DATABASE_URL`,
 `API_ADDR`, and `CONTROL_PLANE_DEV_MODE` are used by the current local
 prototype. Development identity mode is not production authentication.
 
-Change the PostgreSQL host port with `POSTGRES_HOST_PORT` in `.env` and update
-the port in `DATABASE_URL` together. If PostgreSQL port 5432 is occupied, for
-example use `POSTGRES_HOST_PORT=55432` and
+The default PostgreSQL host port is 5434 to keep it separate from the
+disposable test database on 5432. Change the PostgreSQL host port with
+`POSTGRES_HOST_PORT` in `.env` and update the port in `DATABASE_URL` together.
+If PostgreSQL port 5434 is occupied, for example use
+`POSTGRES_HOST_PORT=55432` and
 `DATABASE_URL=postgres://smtp_dev:<local-password>@localhost:55432/smtp_platform?sslmode=disable`.
 Never solve a port or TLS problem by exposing the database publicly or
 disabling certificate validation.
@@ -81,7 +83,7 @@ optional queue worker. It is a prototype runner, not a production supervisor.
 
 The local Compose project contains only PostgreSQL because it is the only
 currently required shared dependency. It uses the explicit `postgres:17`
-image, localhost binding on configurable port 5432 by default, a named `postgres_data` volume, and a
+image, localhost binding on configurable port 5434 by default, a named `postgres_data` volume, and a
 native `pg_isready` health check.
 
 Stopping with `make infra-down` preserves data. Recreating the container also

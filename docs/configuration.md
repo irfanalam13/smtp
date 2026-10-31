@@ -33,11 +33,11 @@ file.
 | `MAILBOX_SERVICE_URL`                | No                    | `http://127.0.0.1:8081`     | Go API's mailbox-service origin; non-loopback origins require HTTPS                                                   |
 | `MAILBOX_SERVICE_HMAC_KEY`           | Mailbox API           | None                        | Shared secret of at least 32 bytes encoded as hexadecimal; signs short-lived internal principal claims                |
 | `SMTP_DELIVERY_ENABLED`              | No                    | `false`                     | Starts outbound delivery when explicitly enabled                                                                       |
-| `SMTP_RELAY_HOST`                    | SMTP relay delivery   | None                        | Authenticated relay hostname, such as `smtp.gmail.com` or `smtp-relay.brevo.com`; leave unset for direct-MX delivery   |
+| `SMTP_RELAY_HOST`                    | Optional relay delivery | None                      | Authenticated relay hostname; leave every `SMTP_RELAY_*` setting unset for direct-MX delivery                          |
 | `SMTP_RELAY_PORT`                    | SMTP relay delivery   | None                        | Required relay port: `587` (STARTTLS) or `465` (implicit TLS)                                                           |
-| `SMTP_RELAY_USERNAME`                | SMTP relay delivery   | None                        | SMTP account username; use a Google account or the SMTP login supplied by Brevo                                        |
-| `SMTP_RELAY_PASSWORD`                | SMTP relay delivery   | None                        | SMTP app password/provider key; keep it in a secret manager                                                            |
-| `SMTP_RELAY_FROM`                    | SMTP relay delivery   | None                        | Only From address permitted for the shared relay account                                                               |
+| `SMTP_RELAY_USERNAME`                | Optional relay delivery | None                      | Relay account username; keep it in a secret manager                                                                     |
+| `SMTP_RELAY_PASSWORD`                | Optional relay delivery | None                      | Relay account password; keep it in a secret manager                                                                     |
+| `SMTP_RELAY_FROM`                    | Optional relay delivery | None                      | Legacy relay configuration address; tenant authorization still applies                                                  |
 | `SMTP_DELIVERY_ALLOWLIST`            | Direct-MX delivery    | None                        | Comma-separated exact destination domains permitted when no authenticated relay is configured                         |
 | `SMTP_DELIVERY_TLS_POLICY`           | No                    | `opportunistic`             | Outbound STARTTLS policy: `opportunistic` or `required`                                                               |
 | `SMTP_DELIVERY_MAX_CONCURRENT`       | No                    | `16`                        | Maximum number of concurrent per-domain SMTP delivery batches per worker                                              |
@@ -95,36 +95,21 @@ port 465 and STARTTLS on other ports. Without a configured relay, password
 login can remain available for existing accounts, while signup and recovery
 are reported as unavailable by `GET /v1/auth/providers`.
 
-The transactional email composer sends through the server-configured shared
-SMTP account. Set `SMTP_DELIVERY_ENABLED=true` and all `SMTP_RELAY_*` values,
-then restart the API and delivery worker. For Google, use `smtp.gmail.com:587`,
-the Google account address, and a Google app password (Google requires
-2-Step Verification). For Brevo, use `smtp-relay.brevo.com:587`, the SMTP login,
-and the SMTP key from Brevo—not the Brevo API key. `SMTP_RELAY_FROM` must be a
-sender address authorized by that account/provider. The composer exposes To,
-Cc, and Bcc; Bcc is stored as envelope-recipient metadata and omitted from the
-message headers sent to recipients. Configure SPF/DKIM/DMARC with the provider
-to improve deliverability. SMTP acceptance is not a guarantee of inbox
-placement. In development, apply the database updates with `make migrate-up`
-before starting the API and worker.
+The transactional email API selects its transport only from server configuration.
+For production direct-MX, set `SMTP_DELIVERY_ENABLED=true`, leave every
+`SMTP_RELAY_*` setting unset, set an exact controlled-test recipient allowlist,
+and mount tenant-domain DKIM keys at `SMTP_DKIM_KEY_DIR`. The API accepts a From
+address only after the authenticated tenant has completed its DNS ownership
+challenge for that exact domain. It persists the tenant, sender domain,
+`direct_mx` mode, and a non-secret `secret-manager://dkim/<domain>` reference;
+the worker loads the corresponding mounted key and never falls back to a relay.
 
-Example `.env` settings for Gmail:
-
-```dotenv
-SMTP_DELIVERY_ENABLED=true
-SMTP_RELAY_HOST=smtp.gmail.com
-SMTP_RELAY_PORT=587
-SMTP_RELAY_USERNAME=your-account@gmail.com
-SMTP_RELAY_PASSWORD=your-google-app-password
-SMTP_RELAY_FROM=your-account@gmail.com
-```
-
-For Brevo, use `SMTP_RELAY_HOST=smtp-relay.brevo.com`, your Brevo SMTP login
-for `SMTP_RELAY_USERNAME`, its SMTP key for `SMTP_RELAY_PASSWORD`, and a
-verified sender for `SMTP_RELAY_FROM`. Keep the password/key in a secret
-manager and never commit it. The API refuses submissions until relay settings
-are complete; the page stays disabled until it can confirm relay readiness.
-Apply queue migration `000031` before deploying the To/Cc/Bcc composer changes.
+For local development, use the exact development-only Mailpit endpoint
+`127.0.0.1:1025` with empty relay credentials. The API marks these messages as
+`mailpit`. An authenticated TLS relay remains available for compatibility, but
+is a separate `relay` mode. The composer exposes To, Cc, and Bcc; Bcc is stored
+only as envelope-recipient metadata. SMTP acceptance is not inbox placement.
+Apply queue migration `000032` before enabling tenant direct-MX submissions.
 
 Apply migrations `000028` and `000029` before enabling browser sessions and
 password accounts. Signup creates a new workspace with the registering user as

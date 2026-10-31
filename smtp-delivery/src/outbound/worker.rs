@@ -37,11 +37,15 @@ impl<R: Resolver + 'static> DeliveryWorker<R> {
 
             let mut claimed = false;
             while tasks.len() < concurrency && !*cancel.borrow() {
-                let batch = if self.processor.config.smtp_relay.is_some() {
-                    self.queue.claim_relay_delivery_batch(&self.owner).await?
+                let delivery_mode = if let Some(relay) = &self.processor.config.smtp_relay {
+                    match relay.mode {
+                        crate::config::SmtpRelayMode::AuthenticatedTls => "relay",
+                        crate::config::SmtpRelayMode::LocalMailpit => "mailpit",
+                    }
                 } else {
-                    self.queue.claim_delivery_batch(&self.owner).await?
+                    "direct_mx"
                 };
+                let batch = self.queue.claim_delivery_batch_for_mode(&self.owner, delivery_mode).await?;
                 let Some(batch) = batch else {
                     break;
                 };
@@ -92,6 +96,11 @@ async fn process_claimed_batch<R: Resolver>(
     batch: ClaimedDeliveryBatch,
 ) {
     let message_id = batch.message_id;
+    tracing::info!(
+        %message_id,
+        recipient_count = batch.attempt_recipients.len(),
+        "processing claimed delivery batch"
+    );
     let renewal_interval = queue.config().lease_duration / 3;
     let process_result = tokio::select! {
         result = processor.process(&batch) => result,
@@ -123,8 +132,55 @@ async fn process_claimed_batch<R: Resolver>(
                 .collect()
         }
     };
+    let accepted = results
+        .iter()
+        .filter(|result| result.state == RecipientDeliveryState::AcceptedByRemote)
+        .count();
+    let temporary_failures = results
+        .iter()
+        .filter(|result| result.state == RecipientDeliveryState::TemporaryFailure)
+        .count();
+    let permanent_failures = results
+        .iter()
+        .filter(|result| result.state == RecipientDeliveryState::PermanentFailure)
+        .count();
+    let uncertain = results
+        .iter()
+        .filter(|result| result.state == RecipientDeliveryState::Uncertain)
+        .count();
     if let Err(error) = queue.complete_delivery_batch(&batch, &results).await {
         tracing::error!(%message_id, %error, "failed to persist delivery batch result");
+        return;
+    }
+
+    match queue.state(message_id).await {
+        Ok(Some(state)) => {
+            if state == mail_queue::QueueState::RetryScheduled {
+                tracing::warn!(
+                    %message_id,
+                    queue_state = ?state,
+                    accepted,
+                    temporary_failures,
+                    permanent_failures,
+                    uncertain,
+                    "delivery outcomes persisted; retry scheduled"
+                );
+            } else {
+                tracing::info!(
+                    %message_id,
+                    queue_state = ?state,
+                    accepted,
+                    temporary_failures,
+                    permanent_failures,
+                    uncertain,
+                    "final delivery status persisted"
+                );
+            }
+        }
+        Ok(None) => tracing::error!(%message_id, "delivery status disappeared after completion"),
+        Err(error) => {
+            tracing::error!(%message_id, %error, "failed to read final delivery status");
+        }
     }
 }
 

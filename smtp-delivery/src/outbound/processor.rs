@@ -29,7 +29,33 @@ impl<R: Resolver> SmtpProcessor<R> {
         if !self.config.enabled {
             return Err(QueueError::Processor("real delivery is disabled".into()));
         }
-        let invalid_reason = if batch.schema_version != CANONICAL_MESSAGE_SCHEMA_VERSION {
+        let expected_mode = if let Some(relay) = &self.config.smtp_relay {
+            match relay.mode {
+                crate::config::SmtpRelayMode::AuthenticatedTls => "relay",
+                crate::config::SmtpRelayMode::LocalMailpit => "mailpit",
+            }
+        } else {
+            "direct_mx"
+        };
+        let dkim_reference_matches = match batch.sender_domain.as_deref() {
+            Some(domain) => batch.dkim_key_ref.as_deref() == Some(&format!("secret-manager://dkim/{domain}")),
+            None => false,
+        };
+        let sender_domain_matches = batch.sender_domain.as_deref()
+            == batch
+                .envelope_sender
+                .rsplit_once('@')
+                .map(|(_, domain)| domain.to_ascii_lowercase())
+                .as_deref();
+        let invalid_reason = if batch.delivery_mode != expected_mode {
+            Some("queued delivery mode does not match this worker configuration".to_owned())
+        } else if batch.delivery_mode == "direct_mx"
+            && (batch.tenant_id.is_none()
+                || !sender_domain_matches
+                || !dkim_reference_matches)
+        {
+            Some("tenant sender or DKIM key reference is invalid".to_owned())
+        } else if batch.schema_version != CANONICAL_MESSAGE_SCHEMA_VERSION {
             Some("unsupported canonical message schema version".to_owned())
         } else if batch.attempt_recipients.iter().any(|recipient| {
             !batch.recipients.contains(&recipient.address)
@@ -199,7 +225,11 @@ mod tests {
         };
         let batch = ClaimedDeliveryBatch {
             message_id: Uuid::new_v4(),
+            tenant_id: Some(Uuid::new_v4()),
             envelope_sender: "sender@example.test".into(),
+            sender_domain: Some("example.test".into()),
+            delivery_mode: "direct_mx".into(),
+            dkim_key_ref: Some("secret-manager://dkim/example.test".into()),
             recipients: vec!["recipient@example.test".into()],
             destination_domain: "example.test".into(),
             raw_message: b"Subject: test\r\n\r\nbody".to_vec(),
@@ -274,7 +304,11 @@ mod tests {
         };
         let batch = ClaimedDeliveryBatch {
             message_id: Uuid::new_v4(),
+            tenant_id: Some(Uuid::new_v4()),
             envelope_sender: "sender@example.test".into(),
+            sender_domain: Some("example.test".into()),
+            delivery_mode: "direct_mx".into(),
+            dkim_key_ref: Some("secret-manager://dkim/example.test".into()),
             recipients: vec!["recipient@example.test".into()],
             destination_domain: "example.test".into(),
             raw_message: b"Subject: canonical\r\n\r\nbody".to_vec(),

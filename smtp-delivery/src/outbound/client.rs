@@ -15,7 +15,7 @@ use tokio::{
 use tokio_rustls::{TlsConnector, client::TlsStream};
 
 use crate::{
-    config::{DeliveryConfig, TlsPolicy},
+    config::{DeliveryConfig, SmtpRelayMode, TlsPolicy},
     dns::{DestinationPolicy, Resolver, recipient_domain, socket_candidates},
     framing::write_message,
     outcome::{DeliveryError, DeliveryOutcome, classify_status},
@@ -192,9 +192,32 @@ async fn deliver_via_relay(
         TcpStream::connect((relay.host.as_str(), relay.port)),
     )
     .await
-    .map_err(|_| DeliveryError::ConnectTimeout)?
-    .map_err(|_| DeliveryError::ConnectTimeout)?;
-    let mut transport = if relay.port == 465 {
+    .map_err(|_| {
+        tracing::warn!(
+            message_id = %job.message_id,
+            smtp_host = %relay.host,
+            smtp_port = relay.port,
+            "SMTP relay connection timed out"
+        );
+        DeliveryError::ConnectTimeout
+    })?
+    .map_err(|error| {
+        tracing::warn!(
+            message_id = %job.message_id,
+            smtp_host = %relay.host,
+            smtp_port = relay.port,
+            %error,
+            "SMTP relay connection failed"
+        );
+        DeliveryError::ConnectTimeout
+    })?;
+    tracing::info!(
+        message_id = %job.message_id,
+        smtp_host = %relay.host,
+        smtp_port = relay.port,
+        "connected to SMTP relay"
+    );
+    let mut transport = if relay.mode == SmtpRelayMode::AuthenticatedTls && relay.port == 465 {
         SmtpTransport::Tls(Box::new(tls_connect(stream, &relay.host, config).await?))
     } else {
         SmtpTransport::Plain(stream)
@@ -211,7 +234,7 @@ async fn deliver_via_relay(
     if ehlo.code != 250 {
         return Err(DeliveryError::Protocol("relay rejected EHLO".into()));
     }
-    if relay.port == 587 {
+    if relay.mode == SmtpRelayMode::AuthenticatedTls && relay.port == 587 {
         if !ehlo
             .lines
             .iter()
@@ -242,22 +265,24 @@ async fn deliver_via_relay(
         }
     }
 
-    let credentials = STANDARD.encode(format!("\0{}\0{}", relay.username, relay.password));
-    send_command(
-        &mut reader,
-        config,
-        &format!("AUTH PLAIN {credentials}\r\n"),
-    )
-    .await?;
-    let auth_reply = read_reply_timeout(&mut reader, config).await?;
-    let auth_reply = if auth_reply.code == 334 {
-        send_command(&mut reader, config, &format!("{credentials}\r\n")).await?;
-        read_reply_timeout(&mut reader, config).await?
-    } else {
-        auth_reply
-    };
-    if auth_reply.code != 235 {
-        return Err(status_error(auth_reply.code, "AUTH"));
+    if relay.mode == SmtpRelayMode::AuthenticatedTls {
+        let credentials = STANDARD.encode(format!("\0{}\0{}", relay.username, relay.password));
+        send_command(
+            &mut reader,
+            config,
+            &format!("AUTH PLAIN {credentials}\r\n"),
+        )
+        .await?;
+        let auth_reply = read_reply_timeout(&mut reader, config).await?;
+        let auth_reply = if auth_reply.code == 334 {
+            send_command(&mut reader, config, &format!("{credentials}\r\n")).await?;
+            read_reply_timeout(&mut reader, config).await?
+        } else {
+            auth_reply
+        };
+        if auth_reply.code != 235 {
+            return Err(status_error(auth_reply.code, "AUTH"));
+        }
     }
 
     send_command(
@@ -327,6 +352,31 @@ async fn deliver_via_relay(
         .and_then(Result::ok),
         Err(_) => None,
     };
+    match &final_reply {
+        Some(reply) if classify_status(reply.code).is_success() => {
+            tracing::info!(
+                message_id = %job.message_id,
+                smtp_host = %relay.host,
+                smtp_code = reply.code,
+                "SMTP relay accepted message"
+            );
+        }
+        Some(reply) => {
+            tracing::warn!(
+                message_id = %job.message_id,
+                smtp_host = %relay.host,
+                smtp_code = reply.code,
+                "SMTP relay rejected message"
+            );
+        }
+        None => {
+            tracing::error!(
+                message_id = %job.message_id,
+                smtp_host = %relay.host,
+                "SMTP final acceptance response is unknown"
+            );
+        }
+    }
     for (index, recipient) in accepted {
         recipient_results[index] = Some(match &final_reply {
             Some(reply) => {

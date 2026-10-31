@@ -25,8 +25,10 @@ are in the [local infrastructure guide](docs/development/local-infrastructure.md
 For a new checkout, run `./scripts/bootstrap-dev.sh` once. For normal
 development, run `./scripts/run-dev.sh`; it starts PostgreSQL, the API,
 dashboard, and SMTP ingress. Outbound delivery is opt-in; use
-`./scripts/run-dev.sh --worker` only with an explicit delivery allowlist. Use
-`./scripts/deploy-preflight.sh --production-env` to validate a production
+`./scripts/run-dev.sh --worker` with an explicit development-only SMTP relay
+or a direct-delivery allowlist. Local Mailpit setup and the API submission
+workflow are documented in the [development guide](docs/development/setup.md).
+Use `./scripts/deploy-preflight.sh --production-env` to validate a production
 environment and build release artifacts. These scripts prepare and run the
 repository but do not deploy it to a cloud provider.
 

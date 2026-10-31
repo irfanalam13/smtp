@@ -137,10 +137,7 @@ clean:
 	rm -rf smtp-dashboard/.next smtp-dashboard/tsconfig.tsbuildinfo
 
 migrate-up:
-	@set -eu; migration_dir=$$(mktemp -d); trap 'rm -rf "$$migration_dir"' EXIT; \
-		./scripts/stage-migrations.sh "$$migration_dir"; \
-		docker run --rm --network host -v "$$migration_dir:/migrations:ro" migrate/migrate:v4.18.3 \
-		-path=/migrations -database "$${DATABASE_URL:?Set DATABASE_URL}" up
+	bash ./scripts/migrate-up.sh
 
 migrate-down:
 	@set -eu; migration_dir=$$(mktemp -d); trap 'rm -rf "$$migration_dir"' EXIT; \

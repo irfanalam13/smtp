@@ -10,7 +10,7 @@ opt-in inbound persistence prototypes.
 | --------------- | ----------------------------------------- |
 | Compose service | `postgres`                                |
 | Image           | `postgres:17`                             |
-| Host address    | `127.0.0.1:${POSTGRES_HOST_PORT:-5432}`   |
+| Host address    | `127.0.0.1:${POSTGRES_HOST_PORT:-5434}`   |
 | Database        | `smtp_platform`                           |
 | User            | `smtp_dev`                                |
 | Password        | `POSTGRES_PASSWORD` from untracked `.env` |
@@ -30,9 +30,10 @@ Stop it without deleting data:
 make infra-down
 ```
 
-Apply the existing migrations with `make migrate-up` after setting
-`DATABASE_URL`. Roll back one migration only against an intentionally
-disposable local database with `make migrate-down`.
+Apply the existing migrations with `make migrate-up`. The target loads
+`DATABASE_URL` from `.env`, verifies the local application database identity,
+and refuses a test or other database. Roll back one migration only against an
+intentionally disposable local database with `make migrate-down`.
 
 Validate an already running isolated database with `make migrate-validate`.
 Create a local logical backup with `make backup-postgres`; see the
@@ -61,3 +62,15 @@ The database port is bound to localhost. Compose does not publish an SMTP,
 API, or dashboard service; those processes are run directly by
 `scripts/run-dev.sh`. Do not add broad host mounts, Docker socket mounts, or
 privileged containers to local services.
+
+## Mailpit
+
+Mailpit is installed and managed locally, not through this Compose project.
+Keep its SMTP and web listeners bound to loopback:
+
+```bash
+mailpit --listen 127.0.0.1:8025 --smtp 127.0.0.1:1025
+```
+
+The platform's development-only relay settings point to SMTP `127.0.0.1:1025`;
+the inbox is at `http://127.0.0.1:8025`. No external email provider is used.

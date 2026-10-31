@@ -119,20 +119,35 @@ impl Queue {
         &self,
         owner: &str,
     ) -> Result<Option<ClaimedDeliveryBatch>, QueueError> {
-        self.claim_delivery_batch_mode(owner, false).await
+        self.claim_delivery_batch_mode(owner, false, None).await
     }
 
     pub async fn claim_relay_delivery_batch(
         &self,
         owner: &str,
     ) -> Result<Option<ClaimedDeliveryBatch>, QueueError> {
-        self.claim_delivery_batch_mode(owner, true).await
+        self.claim_delivery_batch_mode(owner, true, None).await
+    }
+
+    /// Claims only messages for one explicitly configured transport. Workers
+    /// use this to keep Mailpit, relay, and direct-MX queues isolated.
+    pub async fn claim_delivery_batch_for_mode(
+        &self,
+        owner: &str,
+        delivery_mode: &str,
+    ) -> Result<Option<ClaimedDeliveryBatch>, QueueError> {
+        let relay_mode = matches!(delivery_mode, "relay" | "mailpit");
+        if !matches!(delivery_mode, "direct_mx" | "relay" | "mailpit") {
+            return Err(QueueError::InvalidInput("unknown delivery mode".into()));
+        }
+        self.claim_delivery_batch_mode(owner, relay_mode, Some(delivery_mode)).await
     }
 
     async fn claim_delivery_batch_mode(
         &self,
         owner: &str,
         relay_mode: bool,
+        delivery_mode: Option<&str>,
     ) -> Result<Option<ClaimedDeliveryBatch>, QueueError> {
         if owner.is_empty() || owner.len() > 128 {
             return Err(QueueError::InvalidInput(
@@ -152,8 +167,10 @@ impl Queue {
             "SELECT delivery.id, delivery.message_id, delivery.destination_domain
              FROM mail_recipient_deliveries AS delivery
              JOIN mail_queue AS queue ON queue.message_id = delivery.message_id
+             JOIN mail_messages AS message ON message.id = delivery.message_id
              WHERE delivery.state IN ('pending', 'retry_scheduled')
                AND delivery.next_attempt_at <= NOW()
+               AND ($3::text IS NULL OR message.delivery_mode = $3)
                AND queue.created_at > NOW() - ($1 * INTERVAL '1 millisecond')
                AND NOT EXISTS (
                    SELECT 1 FROM mail_delivery_domain_leases AS domain_lease
@@ -179,6 +196,7 @@ impl Queue {
         )
         .bind(max_age_millis)
         .bind(relay_mode)
+        .bind(delivery_mode)
         .fetch_optional(&mut *transaction)
         .await?;
         let Some(candidate) = candidate else {
@@ -302,13 +320,18 @@ impl Queue {
             .collect::<Result<Vec<_>, QueueError>>()?;
 
         let message = sqlx::query(
-            "SELECT envelope_sender, body, message_schema_version, created_at
+            "SELECT tenant_id, envelope_sender, sender_domain, delivery_mode, dkim_key_ref,
+                    body, message_schema_version, created_at
              FROM mail_messages WHERE id = $1",
         )
         .bind(message_id)
         .fetch_one(&mut *transaction)
         .await?;
+        let tenant_id: Option<Uuid> = message.try_get("tenant_id")?;
         let envelope_sender: String = message.try_get("envelope_sender")?;
+        let sender_domain: Option<String> = message.try_get("sender_domain")?;
+        let delivery_mode: String = message.try_get("delivery_mode")?;
+        let dkim_key_ref: Option<String> = message.try_get("dkim_key_ref")?;
         let raw_message: Vec<u8> = message.try_get("body")?;
         let schema_version: i16 = message.try_get("message_schema_version")?;
         let created_at: DateTime<Utc> = message.try_get("created_at")?;
@@ -336,7 +359,11 @@ impl Queue {
         transaction.commit().await?;
         Ok(Some(ClaimedDeliveryBatch {
             message_id,
+            tenant_id,
             envelope_sender,
+            sender_domain,
+            delivery_mode,
+            dkim_key_ref,
             recipients,
             destination_domain,
             raw_message,

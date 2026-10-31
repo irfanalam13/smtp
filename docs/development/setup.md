@@ -12,13 +12,19 @@ not required. The dashboard, API, SMTP listener, and PostgreSQL port should
 remain bound to loopback. The development runner rejects a non-loopback API
 address. External SMTP delivery is disabled by default.
 
-Copy `.env.example` to `.env`, replace the local password, and start PostgreSQL:
+Copy `.env.example` to `.env`, replace the local password in both
+`POSTGRES_PASSWORD` and `DATABASE_URL`, and start PostgreSQL. Alternatively,
+`./scripts/bootstrap-dev.sh` generates a matching local password and URL.
 
 ```sh
 docker compose up -d postgres
-export DATABASE_URL='postgres://smtp_dev:local-password@localhost:5432/smtp_platform?sslmode=disable'
 make migrate-up
 ```
+
+`make migrate-up` loads `DATABASE_URL` from `.env`, verifies a live connection
+identifies the local `smtp_platform` database as `smtp_dev`, and refuses any
+other target. It does not use `TEST_DATABASE_URL` and never runs migrations
+against the test database.
 
 For the first run on a new checkout, use the bootstrap script:
 
@@ -41,9 +47,48 @@ The normal runner starts PostgreSQL and launches the Go API, Next.js
 dashboard, and SMTP ingress without rerunning migrations or installing
 dependencies. It stops application processes on
 `Ctrl-C` and leaves PostgreSQL running. Use `make dev-down` to stop it.
-Outbound delivery does not start by default; `--worker` starts the real SMTP
-delivery worker and requires `SMTP_DELIVERY_ENABLED=true` plus an explicit
-recipient-domain allowlist in `.env`.
+
+Outbound delivery does not start by default. For local testing, use the
+installed Mailpit instance as the SMTP capture server. Mailpit's SMTP listener
+is `127.0.0.1:1025` and its inbox is `http://127.0.0.1:8025`; it requires no
+authentication, TLS, real domain, or public IP. If Mailpit is not already
+running, bind both listeners to loopback:
+
+```sh
+mailpit --listen 127.0.0.1:8025 --smtp 127.0.0.1:1025
+```
+
+The `.env.example` relay host, port, and sender are local Mailpit defaults.
+Keep `SMTP_DELIVERY_ENABLED=false` for normal development; set it to `true`
+and set `CONTROL_PLANE_DEV_MODE=true` in the local `.env` only while testing.
+The unauthenticated plaintext option is accepted only for
+`APP_ENVIRONMENT=development` with host `127.0.0.1` and port `1025`. The
+development identity adapter remains disabled in production. Start the API
+and real delivery worker with:
+
+```sh
+./scripts/run-dev.sh --worker
+```
+
+Submit through the existing authenticated submission API (this header uses
+the explicitly enabled local development identity):
+
+```sh
+curl --fail-with-body --silent --show-error \
+  -X POST http://127.0.0.1:8080/v1/submissions \
+  -H 'Content-Type: application/json' \
+  -H 'X-Dev-Subject: mailpit-local-test' \
+  -H 'Idempotency-Key: mailpit-local-20261031-01' \
+  --data '{"from":"smtp-test@example.test","to":["recipient@example.test"],"subject":"Mailpit local delivery check","text":"Captured by local Mailpit."}'
+```
+
+The API response means only that the job entered PostgreSQL's durable queue.
+Use a new `Idempotency-Key` value for each separate test message.
+The delivery worker records `accepted_by_remote` only after Mailpit returns a
+successful final SMTP response. Check `GET /v1/submissions` with the same
+`X-Dev-Subject` header for the final queue status, and view the captured
+sender, recipient, subject, and body in the Mailpit inbox. Do not configure
+the Mailpit endpoint in production.
 
 Open the dashboard at `http://127.0.0.1:3000`; the API is at
 `http://127.0.0.1:8080`, and local SMTP listens on `127.0.0.1:2525`. These
@@ -100,11 +145,11 @@ cargo run -p smtp-ingress
 It binds only to `127.0.0.1:2525` by default and is not a production mail
 service. Its protocol tests run with `cargo test -p smtp-ingress`.
 
-Apply the queue migration with `make migrate-up`. To run external delivery,
-configure `SMTP_DELIVERY_ENABLED=true` and a comma-separated exact-domain
-`SMTP_DELIVERY_ALLOWLIST`, then use `cargo run -p mail-delivery` or
-`./scripts/run-dev.sh --worker`. Queue integration tests are destructive and
-require an explicitly isolated database:
+Direct-to-MX delivery (not required for local Mailpit tests) still requires
+`SMTP_DELIVERY_ENABLED=true`, a comma-separated exact-domain
+`SMTP_DELIVERY_ALLOWLIST`, and the configured DKIM key directory. Queue
+integration tests are destructive and require an explicitly isolated
+database:
 
 ```sh
 export TEST_DATABASE_URL='postgres://smtp_dev:local-password@localhost:5432/smtp_platform_test?sslmode=disable'

@@ -9,6 +9,13 @@ pub struct SmtpRelayConfig {
     pub username: String,
     pub password: String,
     pub from_address: String,
+    pub mode: SmtpRelayMode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SmtpRelayMode {
+    AuthenticatedTls,
+    LocalMailpit,
 }
 
 impl std::fmt::Debug for SmtpRelayConfig {
@@ -17,9 +24,10 @@ impl std::fmt::Debug for SmtpRelayConfig {
             .debug_struct("SmtpRelayConfig")
             .field("host", &self.host)
             .field("port", &self.port)
-            .field("username", &self.username)
+            .field("username", &"[REDACTED]")
             .field("password", &"[REDACTED]")
             .field("from_address", &self.from_address)
+            .field("mode", &self.mode)
             .finish()
     }
 }
@@ -89,7 +97,11 @@ impl DeliveryConfig {
         let max_message_bytes = env_usize("SMTP_DELIVERY_MAX_MESSAGE_BYTES", 10 * 1024 * 1024)?;
         let allowlist = env_string("SMTP_DELIVERY_ALLOWLIST", "")?;
         let dkim_key_dir = std::env::var_os("SMTP_DKIM_KEY_DIR").map(PathBuf::from);
-        let smtp_relay = smtp_relay_from_env()?;
+        let smtp_relay = smtp_relay_from_env(
+            env_string("APP_ENVIRONMENT", "")?
+                .trim()
+                .eq_ignore_ascii_case("development"),
+        )?;
         let allowed_recipient_domains = allowlist
             .split(',')
             .filter(|domain| !domain.trim().is_empty())
@@ -161,19 +173,28 @@ impl DeliveryConfig {
             return Err(DeliveryConfigError::MissingDkimKeyDir);
         }
         if let Some(relay) = &self.smtp_relay {
-            if self.test_endpoint.is_some()
-                || !valid_domain(&relay.host)
-                || !matches!(relay.port, 465 | 587)
-                || !valid_relay_address(&relay.from_address)
-                || relay.username.is_empty()
-                || relay.username.len() > 512
-                || relay.password.is_empty()
-                || relay.password.len() > 512
-                || relay.username.len() + relay.password.len() + 2 > 360
-                || [relay.username.as_str(), relay.password.as_str()]
-                    .iter()
-                    .any(|value| value.chars().any(char::is_control))
-            {
+            let valid = match relay.mode {
+                SmtpRelayMode::AuthenticatedTls => {
+                    self.test_endpoint.is_none()
+                        && valid_domain(&relay.host)
+                        && matches!(relay.port, 465 | 587)
+                        && !relay.username.is_empty()
+                        && relay.username.len() <= 512
+                        && !relay.password.is_empty()
+                        && relay.password.len() <= 512
+                        && relay.username.len() + relay.password.len() + 2 <= 360
+                        && ![relay.username.as_str(), relay.password.as_str()]
+                            .iter()
+                            .any(|value| value.chars().any(char::is_control))
+                }
+                SmtpRelayMode::LocalMailpit => {
+                    relay.host == "127.0.0.1"
+                        && relay.port == 1025
+                        && relay.username.is_empty()
+                        && relay.password.is_empty()
+                }
+            };
+            if !valid || !valid_relay_address(&relay.from_address) {
                 return Err(DeliveryConfigError::InvalidRelay);
             }
         }
@@ -181,15 +202,48 @@ impl DeliveryConfig {
     }
 }
 
-fn smtp_relay_from_env() -> Result<Option<SmtpRelayConfig>, DeliveryConfigError> {
-    let host = optional_env("SMTP_RELAY_HOST")?;
-    let port = optional_env("SMTP_RELAY_PORT")?;
-    let username = optional_env("SMTP_RELAY_USERNAME")?;
-    let password = optional_env("SMTP_RELAY_PASSWORD")?;
-    let from_address = optional_env("SMTP_RELAY_FROM")?;
+fn smtp_relay_from_env(
+    allow_local_mailpit: bool,
+) -> Result<Option<SmtpRelayConfig>, DeliveryConfigError> {
+    smtp_relay_from_values(
+        optional_env("SMTP_RELAY_HOST")?,
+        optional_env("SMTP_RELAY_PORT")?,
+        optional_env("SMTP_RELAY_USERNAME")?,
+        optional_env("SMTP_RELAY_PASSWORD")?,
+        optional_env("SMTP_RELAY_FROM")?,
+        allow_local_mailpit,
+    )
+}
+
+fn smtp_relay_from_values(
+    host: Option<String>,
+    port: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+    from_address: Option<String>,
+    allow_local_mailpit: bool,
+) -> Result<Option<SmtpRelayConfig>, DeliveryConfigError> {
     let values = [&host, &port, &username, &password, &from_address];
     if values.iter().all(|value| value.is_none()) {
         return Ok(None);
+    }
+    if host.as_deref() == Some("127.0.0.1")
+        && port.as_deref() == Some("1025")
+        && username.is_none()
+        && password.is_none()
+        && from_address.is_some()
+    {
+        if !allow_local_mailpit {
+            return Err(DeliveryConfigError::LocalMailpitDevelopmentOnly);
+        }
+        return Ok(Some(SmtpRelayConfig {
+            host: "127.0.0.1".into(),
+            port: 1025,
+            username: String::new(),
+            password: String::new(),
+            from_address: from_address.ok_or(DeliveryConfigError::IncompleteRelay)?,
+            mode: SmtpRelayMode::LocalMailpit,
+        }));
     }
     if values.iter().any(|value| value.is_none()) {
         return Err(DeliveryConfigError::IncompleteRelay);
@@ -208,6 +262,7 @@ fn smtp_relay_from_env() -> Result<Option<SmtpRelayConfig>, DeliveryConfigError>
         username,
         password,
         from_address,
+        mode: SmtpRelayMode::AuthenticatedTls,
     }))
 }
 
@@ -285,6 +340,8 @@ pub enum DeliveryConfigError {
     MissingDkimKeyDir,
     #[error("SMTP relay settings must be configured together")]
     IncompleteRelay,
+    #[error("unauthenticated Mailpit delivery is available only in development")]
+    LocalMailpitDevelopmentOnly,
     #[error("invalid SMTP relay configuration")]
     InvalidRelay,
     #[error("invalid delivery setting: {0}")]
@@ -309,8 +366,11 @@ mod tests {
             username: "user".into(),
             password: "secret-password".into(),
             from_address: "sender@example.test".into(),
+            mode: SmtpRelayMode::AuthenticatedTls,
         };
-        assert!(!format!("{relay:?}").contains("secret-password"));
+        let debug = format!("{relay:?}");
+        assert!(!debug.contains("secret-password"));
+        assert!(!debug.contains("username: \"user\""));
     }
 
     #[test]
@@ -323,10 +383,71 @@ mod tests {
                 username: "user".into(),
                 password: "secret".into(),
                 from_address: "sender@example.test".into(),
+                mode: SmtpRelayMode::AuthenticatedTls,
             }),
             ..DeliveryConfig::default()
         };
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn unauthenticated_mailpit_relay_is_development_only() {
+        let from = Some("sender@example.test".to_owned());
+        let relay = smtp_relay_from_values(
+            Some("127.0.0.1".into()),
+            Some("1025".into()),
+            None,
+            None,
+            from.clone(),
+            true,
+        )
+        .expect("development Mailpit config");
+        assert_eq!(
+            relay.as_ref().map(|config| config.mode),
+            Some(SmtpRelayMode::LocalMailpit)
+        );
+        assert!(
+            smtp_relay_from_values(
+                Some("127.0.0.1".into()),
+                Some("1025".into()),
+                None,
+                None,
+                from.clone(),
+                false,
+            )
+            .is_err()
+        );
+        assert!(
+            smtp_relay_from_values(
+                Some("127.0.0.1".into()),
+                Some("1025".into()),
+                Some("unexpected".into()),
+                None,
+                from,
+                true,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn local_mailpit_relay_requires_exact_loopback_endpoint_and_no_auth() {
+        let config = DeliveryConfig {
+            enabled: true,
+            smtp_relay: Some(SmtpRelayConfig {
+                host: "localhost".into(),
+                port: 1025,
+                username: String::new(),
+                password: String::new(),
+                from_address: "sender@example.test".into(),
+                mode: SmtpRelayMode::LocalMailpit,
+            }),
+            ..DeliveryConfig::default()
+        };
+        assert!(matches!(
+            config.validate(),
+            Err(DeliveryConfigError::InvalidRelay)
+        ));
     }
 
     #[test]

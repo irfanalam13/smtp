@@ -1,6 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
-use mail_delivery::{DeliveryConfig, DnsResolver, SmtpProcessor, worker::DeliveryWorker};
+use mail_delivery::{
+    DeliveryConfig, DnsResolver, SmtpProcessor,
+    config::{SmtpRelayConfig, SmtpRelayMode},
+    worker::DeliveryWorker,
+};
 use mail_queue::{EnqueueRequest, Queue, QueueConfig, QueueState};
 use shared_types::{CanonicalMessage, MessageEnvelope, MimeLimits};
 use tokio::{
@@ -138,4 +142,80 @@ async fn canonical_message_reaches_smtp_and_persists_remote_acceptance() {
         .expect("join delivery worker")
         .expect("delivery worker exits cleanly");
     smtp_fixture.await.expect("SMTP fixture succeeds");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL, migrations through 000021, and local Mailpit on 127.0.0.1:1025"]
+async fn canonical_message_reaches_mailpit_and_persists_remote_acceptance() {
+    let queue = Queue::connect(QueueConfig {
+        database_url: test_database_url(),
+        ..QueueConfig::default()
+    })
+    .await
+    .expect("connect test database");
+    clean(&queue).await;
+
+    let canonical = CanonicalMessage::parse(
+        MessageEnvelope {
+            sender: "smtp-test@example.test".into(),
+            recipients: vec!["recipient@example.test".into()],
+        },
+        b"From: smtp-test@example.test\r\nTo: recipient@example.test\r\nSubject: Mailpit worker integration\r\n\r\nCaptured by local Mailpit.".to_vec(),
+        MimeLimits::default(),
+    )
+    .expect("parse canonical message");
+    let enqueued = queue
+        .enqueue(&EnqueueRequest::new(
+            &canonical,
+            "mailpit-worker-integration".into(),
+            "mailpit-delivery-integration-test".into(),
+        ))
+        .await
+        .expect("enqueue canonical message");
+    let message_id = enqueued.message_id;
+
+    let processor = Arc::new(SmtpProcessor {
+        config: DeliveryConfig {
+            enabled: true,
+            smtp_relay: Some(SmtpRelayConfig {
+                host: "127.0.0.1".into(),
+                port: 1025,
+                username: String::new(),
+                password: String::new(),
+                from_address: "smtp-test@example.test".into(),
+                mode: SmtpRelayMode::LocalMailpit,
+            }),
+            command_timeout: Duration::from_secs(2),
+            overall_timeout: Duration::from_secs(5),
+            ..DeliveryConfig::default()
+        },
+        resolver: Arc::new(DnsResolver::default()),
+    });
+    let worker = DeliveryWorker {
+        queue: queue.clone(),
+        processor,
+        owner: "mailpit-worker-integration".into(),
+        poll_interval: Duration::from_millis(10),
+    };
+    let (shutdown, cancel) = tokio::sync::watch::channel(false);
+    let worker_task = tokio::spawn(async move { worker.run_until_cancelled(cancel).await });
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if queue.state(message_id).await.expect("read queue state")
+                == Some(QueueState::AcceptedByRemote)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("worker did not persist Mailpit acceptance");
+
+    shutdown.send(true).expect("signal worker shutdown");
+    worker_task
+        .await
+        .expect("join delivery worker")
+        .expect("delivery worker exits cleanly");
 }
