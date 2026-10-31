@@ -42,7 +42,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: smtp-api/go.mod
           cache: true
@@ -132,7 +132,7 @@ jobs:
         run: |
           cargo test -p shared-types --test mailbox_store_postgres -- --ignored --test-threads=1
           cargo test -p mailbox-service mailbox_http_api_provisions_and_appends_idempotently -- --ignored --test-threads=1
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: smtp-api/go.mod
           cache: true
