@@ -9,7 +9,7 @@ autobins = false
 async-trait = "0.1.89"
 chrono = { version = "0.4.42", features = ["serde", "clock"] }
 rand = "0.9.2"
-sha2 = "0.10.9"
+sha2 = "0.11.1"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono"] }
 serde_json.workspace = true
 shared-types = { path = "../smtp-core" }
