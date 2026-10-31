@@ -1,233 +1,189 @@
-use std::fmt;
+use thiserror::Error;
+
+pub mod server;
+
+pub const MAX_COMMAND_BYTES: usize = 8192;
+pub const MAX_LITERAL_BYTES: usize = 10 * 1024 * 1024;
+pub const MAX_SEQUENCE_SET_BYTES: usize = 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Command {
-    Login {
-        username: String,
-        password: String,
-    },
-    Select(String),
-    Fetch {
-        sequence: String,
-        items: String,
-    },
-    Store {
-        sequence: String,
-        operation: String,
-        flags: String,
-    },
-    Search(String),
-    Copy {
-        sequence: String,
-        mailbox: String,
-    },
-    Move {
-        sequence: String,
-        mailbox: String,
-    },
-    Append {
-        mailbox: String,
-        message: Vec<u8>,
-    },
-    Delete(String),
-    Expunge,
-    Logout,
-    Noop,
-    Capability,
+pub struct CommandLine {
+    pub tag: String,
+    pub name: String,
+    pub arguments: Vec<Token>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Token {
+    Atom(String),
+    Quoted(String),
+    OpenParen,
+    CloseParen,
+}
+
+impl Token {
+    pub fn value(&self) -> Option<&str> {
+        match self {
+            Self::Atom(value) | Self::Quoted(value) => Some(value),
+            Self::OpenParen | Self::CloseParen => None,
+        }
+    }
+
+    pub fn is_atom(&self, value: &str) -> bool {
+        matches!(self, Self::Atom(atom) if atom.eq_ignore_ascii_case(value))
+    }
+}
+
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum ParseError {
+    #[error("command is empty")]
     Empty,
-    MissingTag,
+    #[error("command contains invalid UTF-8 or control bytes")]
+    InvalidEncoding,
+    #[error("command exceeds its line limit")]
+    LineTooLong,
+    #[error("command tag is invalid")]
+    InvalidTag,
+    #[error("command is missing an argument")]
     MissingArgument,
-    InvalidLiteral,
-    Unsupported,
+    #[error("quoted string is malformed")]
+    InvalidQuotedString,
+    #[error("command syntax is invalid")]
+    InvalidSyntax,
+    #[error("literal exceeds its configured limit")]
+    LiteralTooLarge,
 }
 
-pub fn parse(input: &str) -> Result<(String, Command), ParseError> {
-    let mut parts = input
-        .trim_end_matches('\n')
-        .trim_end_matches('\r')
-        .splitn(3, ' ');
-    let tag = parts
-        .next()
-        .filter(|value| !value.is_empty())
-        .ok_or(ParseError::MissingTag)?;
-    let name = parts.next().ok_or(ParseError::MissingArgument)?;
-    let argument = parts.next().unwrap_or("").trim();
-    let command = match name.to_ascii_uppercase().as_str() {
-        "LOGIN" => {
-            let mut values = argument.splitn(2, ' ');
-            Command::Login {
-                username: values
-                    .next()
-                    .filter(|v| !v.is_empty())
-                    .ok_or(ParseError::MissingArgument)?
-                    .to_string(),
-                password: values
-                    .next()
-                    .filter(|v| !v.is_empty())
-                    .ok_or(ParseError::MissingArgument)?
-                    .to_string(),
-            }
+pub fn parse_command_line(input: &[u8]) -> Result<CommandLine, ParseError> {
+    if input.len() > MAX_COMMAND_BYTES {
+        return Err(ParseError::LineTooLong);
+    }
+    let input = input.strip_suffix(b"\r\n").unwrap_or(input);
+    let input = std::str::from_utf8(input).map_err(|_| ParseError::InvalidEncoding)?;
+    if input.is_empty() {
+        return Err(ParseError::Empty);
+    }
+    if input
+        .bytes()
+        .any(|byte| byte == 0 || (byte < 0x20 && byte != b' ') || byte == 0x7f)
+    {
+        return Err(ParseError::InvalidEncoding);
+    }
+    let tokens = tokenize(input)?;
+    let mut tokens = tokens.into_iter();
+    let tag = match tokens.next() {
+        Some(Token::Atom(tag))
+            if tag != "*"
+                && tag.len() <= 64
+                && tag.bytes().all(|byte| (0x21..=0x7e).contains(&byte)) =>
+        {
+            tag
         }
-        "SELECT" => Command::Select(required(argument)?),
-        "FETCH" => {
-            let (sequence, items) = argument
-                .split_once(' ')
-                .ok_or(ParseError::MissingArgument)?;
-            Command::Fetch {
-                sequence: sequence.into(),
-                items: items.into(),
-            }
-        }
-        "STORE" => {
-            let mut values = argument.splitn(3, ' ');
-            Command::Store {
-                sequence: values.next().ok_or(ParseError::MissingArgument)?.into(),
-                operation: values.next().ok_or(ParseError::MissingArgument)?.into(),
-                flags: values.next().ok_or(ParseError::MissingArgument)?.into(),
-            }
-        }
-        "SEARCH" => Command::Search(argument.to_string()),
-        "COPY" | "MOVE" => {
-            let (sequence, mailbox) = argument
-                .split_once(' ')
-                .ok_or(ParseError::MissingArgument)?;
-            if name.eq_ignore_ascii_case("COPY") {
-                Command::Copy {
-                    sequence: sequence.into(),
-                    mailbox: mailbox.into(),
-                }
-            } else {
-                Command::Move {
-                    sequence: sequence.into(),
-                    mailbox: mailbox.into(),
-                }
-            }
-        }
-        "APPEND" => {
-            let mailbox = argument
-                .strip_suffix('}')
-                .and_then(|value| value.rsplit_once('{'))
-                .map(|(name, _)| name.trim())
-                .ok_or(ParseError::InvalidLiteral)?;
-            Command::Append {
-                mailbox: mailbox.to_string(),
-                message: Vec::new(),
-            }
-        }
-        "DELETE" => Command::Delete(required(argument)?),
-        "EXPUNGE" => Command::Expunge,
-        "LOGOUT" => Command::Logout,
-        "NOOP" => Command::Noop,
-        "CAPABILITY" => Command::Capability,
-        _ => return Err(ParseError::Unsupported),
+        _ => return Err(ParseError::InvalidTag),
     };
-    Ok((tag.to_string(), command))
+    let name = match tokens.next() {
+        Some(Token::Atom(name))
+            if !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_alphabetic()) =>
+        {
+            name.to_ascii_uppercase()
+        }
+        _ => return Err(ParseError::MissingArgument),
+    };
+    Ok(CommandLine {
+        tag,
+        name,
+        arguments: tokens.collect(),
+    })
 }
 
-fn required(value: &str) -> Result<String, ParseError> {
-    (!value.is_empty())
-        .then(|| value.to_string())
-        .ok_or(ParseError::MissingArgument)
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SessionState {
-    NotAuthenticated,
-    Authenticated,
-    Selected { mailbox: String },
-    Closed,
-}
-
-pub struct Session {
-    state: SessionState,
-    max_literal_bytes: usize,
-}
-
-impl Session {
-    pub fn new(max_literal_bytes: usize) -> Self {
-        Self {
-            state: SessionState::NotAuthenticated,
-            max_literal_bytes,
+fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
+    let bytes = input.as_bytes();
+    let mut result = Vec::new();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b' ' | b'\t' => cursor += 1,
+            b'(' => {
+                result.push(Token::OpenParen);
+                cursor += 1;
+            }
+            b')' => {
+                result.push(Token::CloseParen);
+                cursor += 1;
+            }
+            b'"' => {
+                cursor += 1;
+                let mut value = Vec::new();
+                let mut closed = false;
+                while cursor < bytes.len() {
+                    match bytes[cursor] {
+                        b'"' => {
+                            cursor += 1;
+                            closed = true;
+                            break;
+                        }
+                        b'\\' => {
+                            cursor += 1;
+                            let Some(escaped) = bytes.get(cursor).copied() else {
+                                return Err(ParseError::InvalidQuotedString);
+                            };
+                            if escaped < 0x20 || escaped == 0x7f {
+                                return Err(ParseError::InvalidQuotedString);
+                            }
+                            value.push(escaped);
+                            cursor += 1;
+                        }
+                        byte if byte < 0x20 || byte == 0x7f => {
+                            return Err(ParseError::InvalidQuotedString);
+                        }
+                        byte => {
+                            value.push(byte);
+                            cursor += 1;
+                        }
+                    }
+                }
+                if !closed {
+                    return Err(ParseError::InvalidQuotedString);
+                }
+                result.push(Token::Quoted(
+                    String::from_utf8(value).map_err(|_| ParseError::InvalidEncoding)?,
+                ));
+            }
+            _ => {
+                let start = cursor;
+                while cursor < bytes.len() && !matches!(bytes[cursor], b' ' | b'\t' | b'(' | b')') {
+                    cursor += 1;
+                }
+                let atom = std::str::from_utf8(&bytes[start..cursor])
+                    .map_err(|_| ParseError::InvalidEncoding)?;
+                result.push(Token::Atom(atom.to_owned()));
+            }
         }
     }
-
-    pub fn state(&self) -> &SessionState {
-        &self.state
-    }
-
-    pub fn process(&mut self, tag: &str, command: Command) -> Vec<String> {
-        let result = match command {
-            Command::Capability => vec![
-                "* CAPABILITY IMAP4rev2".into(),
-                tagged(tag, "OK capability list"),
-            ],
-            Command::Login { .. } if self.state == SessionState::NotAuthenticated => {
-                self.state = SessionState::Authenticated;
-                vec![tagged(tag, "OK LOGIN completed")]
-            }
-            Command::Login { .. } => vec![tagged(tag, "BAD LOGIN not permitted")],
-            Command::Select(mailbox)
-                if self.state != SessionState::NotAuthenticated
-                    && self.state != SessionState::Closed =>
-            {
-                self.state = SessionState::Selected { mailbox };
-                vec![
-                    "* 0 EXISTS".into(),
-                    "* 0 RECENT".into(),
-                    tagged(tag, "OK [READ-WRITE] SELECT completed"),
-                ]
-            }
-            Command::Select(_) => vec![tagged(tag, "NO authentication required")],
-            Command::Logout => {
-                self.state = SessionState::Closed;
-                vec![
-                    "* BYE logging out".into(),
-                    tagged(tag, "OK LOGOUT completed"),
-                ]
-            }
-            Command::Noop => vec![tagged(tag, "OK NOOP completed")],
-            command
-                if matches!(self.state, SessionState::Selected { .. })
-                    && command_requires_selected(&command) =>
-            {
-                vec![tagged(tag, "OK command accepted by mailbox boundary")]
-            }
-            _ => vec![tagged(tag, "BAD command invalid in current state")],
-        };
-        result
-    }
+    Ok(result)
 }
 
-fn command_requires_selected(command: &Command) -> bool {
-    matches!(
-        command,
-        Command::Fetch { .. }
-            | Command::Store { .. }
-            | Command::Search(_)
-            | Command::Copy { .. }
-            | Command::Move { .. }
-            | Command::Append { .. }
-            | Command::Delete(_)
-            | Command::Expunge
-    )
-}
-
-fn tagged(tag: &str, message: &str) -> String {
-    format!("{tag} {message}")
-}
-
-impl fmt::Debug for Session {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("Session")
-            .field("state", &self.state)
-            .field("max_literal_bytes", &self.max_literal_bytes)
-            .finish()
+pub fn parse_literal_marker(input: &str) -> Result<Option<(usize, bool)>, ParseError> {
+    let Some(open) = input.rfind('{') else {
+        return Ok(None);
+    };
+    if !input.ends_with('}') {
+        return Ok(None);
     }
+    let marker = &input[open + 1..input.len() - 1];
+    let (digits, non_synchronizing) = marker
+        .strip_suffix('+')
+        .map_or((marker, false), |digits| (digits, true));
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(ParseError::InvalidSyntax);
+    }
+    let size = digits
+        .parse::<usize>()
+        .map_err(|_| ParseError::LiteralTooLarge)?;
+    if size > MAX_LITERAL_BYTES {
+        return Err(ParseError::LiteralTooLarge);
+    }
+    Ok(Some((size, non_synchronizing)))
 }
 
 #[cfg(test)]
@@ -235,28 +191,62 @@ mod tests {
     use super::*;
 
     #[test]
-    fn enforces_imap_auth_and_selection_states() {
-        let (tag, command) = parse("a1 LOGIN user pass\r\n").unwrap();
-        let mut session = Session::new(1024);
+    fn parses_tags_atoms_quoted_strings_and_parentheses() {
+        let command = parse_command_line(b"A1 LOGIN \"tenant:alice\" \"pass word\"\r\n").unwrap();
+        assert_eq!(command.tag, "A1");
+        assert_eq!(command.name, "LOGIN");
         assert_eq!(
-            session.process(&tag, command),
-            vec!["a1 OK LOGIN completed"]
+            command.arguments,
+            vec![
+                Token::Quoted("tenant:alice".into()),
+                Token::Quoted("pass word".into())
+            ]
         );
-        let (tag, command) = parse("a2 SELECT INBOX\r\n").unwrap();
-        assert!(
-            session
-                .process(&tag, command)
-                .iter()
-                .any(|line| line.contains("SELECT completed"))
+        assert_eq!(
+            parse_command_line(b"a2 STORE 1 +FLAGS (\\Seen \\Flagged)\r\n")
+                .unwrap()
+                .arguments,
+            vec![
+                Token::Atom("1".into()),
+                Token::Atom("+FLAGS".into()),
+                Token::OpenParen,
+                Token::Atom("\\Seen".into()),
+                Token::Atom("\\Flagged".into()),
+                Token::CloseParen
+            ]
         );
     }
 
     #[test]
-    fn parses_core_commands() {
-        assert!(matches!(
-            parse("a1 FETCH 1 BODY[]").unwrap().1,
-            Command::Fetch { .. }
-        ));
-        assert!(matches!(parse("a2 EXPUNGE").unwrap().1, Command::Expunge));
+    fn rejects_invalid_encoding_controls_and_tags() {
+        assert_eq!(
+            parse_command_line(b"A1 NOOP\xff\r\n"),
+            Err(ParseError::InvalidEncoding)
+        );
+        assert_eq!(
+            parse_command_line(b"* NOOP\r\n"),
+            Err(ParseError::InvalidTag)
+        );
+        assert_eq!(
+            parse_command_line(b"A1 NOOP\0\r\n"),
+            Err(ParseError::InvalidEncoding)
+        );
+    }
+
+    #[test]
+    fn parses_bounded_synchronizing_literals_only() {
+        assert_eq!(
+            parse_literal_marker("A1 APPEND INBOX {123}").unwrap(),
+            Some((123, false))
+        );
+        assert_eq!(
+            parse_literal_marker("A1 APPEND INBOX {123+}").unwrap(),
+            Some((123, true))
+        );
+        assert_eq!(parse_literal_marker("A1 LOGIN user pass").unwrap(), None);
+        assert_eq!(
+            parse_literal_marker(&format!("A1 APPEND INBOX {{{}}}", MAX_LITERAL_BYTES + 1)),
+            Err(ParseError::LiteralTooLarge)
+        );
     }
 }

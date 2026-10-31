@@ -16,7 +16,7 @@ parallel implementations or a catch-all module.
 | `smtp-imap/`, `smtp-pop3/` | Rust protocol workspace boundaries for mailbox access; keep protocol-specific behavior here rather than in the API or shared core. |
 | `smtp-api/` | Independent Go module. `cmd/` contains executables; `internal/` owns the control plane and cross-cutting API packages. |
 | `smtp-dashboard/` | Next.js application and the root pnpm workspace member. |
-| `smtp-storage/postgres/` | Ordered, paired up/down PostgreSQL migrations and storage assets. Schema changes belong here. |
+| `smtp-storage/postgres/` | Feature-grouped, globally ordered PostgreSQL migration pairs. Schema changes belong here. |
 | `docs/` | API contracts, architecture, development, operations, security, standards, and frontend conventions. |
 | `scripts/`, `infrastructure/`, `observability/`, `.github/` | Repository tooling, deployment assets, operational configuration, and CI workflows. |
 
@@ -57,16 +57,16 @@ between services.
 `health`, `identity`, `observability`, `security`, and `webhooks`. Within
 `internal/controlplane/`, files are grouped by API or persistence feature:
 
-- `handler.go` composes routes and request context; `*_handlers.go` files own
+- `routes.go` composes routes and request context; `*_handlers.go` files own
   tenant, domain, mailbox, and API-key HTTP workflows.
 - `types.go`, `errors.go`, `store.go`, and `auth.go` own shared control-plane
   models, errors, in-memory state, and authorization.
 - `domains.go`, `mailboxes.go`, `api_keys.go`, and `usage.go` own in-memory
   feature behavior; `http_json.go` owns shared JSON responses and decoding.
 - `postgres.go` owns repository setup and lifecycle;
-  `postgres_auth.go`, `postgres_mailboxes.go`, and `postgres_api_keys.go` own
+  `auth_postgres.go`, `mailboxes_postgres.go`, and `api_keys_postgres.go` own
   their respective database operations. Domain and submission persistence
-  remain in `domains_postgres.go` and `submission_postgres.go`.
+  remain in `domains_postgres.go` and `submissions_postgres.go`.
 - `submission.go` owns request validation and submission behavior.
 
 Keep related tests beside the package they exercise. Add a new file when a
@@ -86,9 +86,11 @@ before adding dashboard code.
 
 ### Database, contracts, tests, and docs
 
-- `smtp-storage/postgres/` owns numbered migrations with matching `.up.sql`
-  and `.down.sql` files. Do not edit an old migration to introduce a new schema
-  change; add the next migration pair.
+- `smtp-storage/postgres/` owns numbered migrations grouped by schema feature,
+  with matching `.up.sql` and `.down.sql` files. Their numeric prefixes define
+  one global order. `scripts/stage-migrations.sh` flattens them for the
+  `migrate` CLI. Do not edit an old migration to introduce a new schema change;
+  add the next migration pair to its feature folder.
 - `docs/api/openapi.yaml` is the HTTP contract. Keep API routes, handlers,
   dashboard service calls, and OpenAPI changes aligned.
 - Rust unit/integration tests live with their crate; Go tests live with their

@@ -3,16 +3,18 @@ package controlplane
 import (
 	"crypto/rand"
 	"encoding/hex"
+	smtpAuth "example.com/smtp-platform/smtp-auth"
 	"time"
 )
 
 type Principal struct {
-	Subject  string
-	TenantID string
-	UserID   string
-	Role     Role
-	Scopes   map[string]bool
-	durable  bool
+	Subject   string
+	TenantID  string
+	UserID    string
+	Role      Role
+	Scopes    map[string]bool
+	sessionID string
+	durable   bool
 }
 
 type Tenant struct {
@@ -54,10 +56,10 @@ func (s *Store) Principal(subject string) Principal {
 		s.users[subject] = userID
 		s.tenants[tenantID] = Tenant{ID: tenantID, Name: "Local development account", Status: "active", CreatedAt: time.Now().UTC()}
 		s.memberships[userID] = map[string]Role{tenantID: Owner}
-		return Principal{Subject: subject, UserID: userID, TenantID: tenantID, Role: Owner, Scopes: map[string]bool{"domains:read": true, "domains:write": true, "keys:write": true, "delivery:read": true, "delivery:write": true}}
+		return Principal{Subject: subject, UserID: userID, TenantID: tenantID, Role: Owner, Scopes: smtpAuth.PermissionsForRole(string(Owner))}
 	}
 	for tenantID, role := range s.memberships[userID] {
-		return Principal{Subject: subject, UserID: userID, TenantID: tenantID, Role: role, Scopes: map[string]bool{"domains:read": true, "domains:write": role != Member, "keys:write": role != Member, "delivery:read": true, "delivery:write": role != Member}}
+		return Principal{Subject: subject, UserID: userID, TenantID: tenantID, Role: role, Scopes: smtpAuth.PermissionsForRole(string(role))}
 	}
 	return Principal{}
 }

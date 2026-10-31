@@ -175,6 +175,19 @@ async fn provisioning_quota_and_mailbox_lifecycle_are_transactional() {
         .iter()
         .find(|folder| folder.name == "INBOX")
         .unwrap();
+    assert!(matches!(
+        store
+            .append_for_user(
+                tenant_id,
+                collaborator_id,
+                inbox.id,
+                b"unauthorized",
+                &[],
+                Utc::now(),
+            )
+            .await,
+        Err(MailboxStoreError::MailboxNotFound)
+    ));
     let nested = store
         .create_child_folder(inbox.id, "Receipts")
         .await
@@ -846,4 +859,198 @@ async fn provisioning_quota_and_mailbox_lifecycle_are_transactional() {
         .await
         .expect("remove test tenant");
     pool.close().await;
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL and migrations"]
+async fn idempotent_append_replays_one_message_and_rejects_key_reuse() {
+    let pool = PgPoolOptions::new()
+        .max_connections(4)
+        .connect(&test_database_url())
+        .await
+        .expect("connect isolated test database");
+    let tenant_id = Uuid::new_v4();
+    let domain_id = Uuid::new_v4();
+    let owner_id = Uuid::new_v4();
+    insert_tenant_fixture(&pool, tenant_id, domain_id, owner_id).await;
+    let store = MailboxStore::from_pool(pool.clone(), 1024);
+    let mailbox = store
+        .create_mailbox(&CreateMailbox {
+            tenant_id,
+            domain_id,
+            local_part: format!("append-{}", Uuid::new_v4().simple()),
+            display_name: "Idempotent append test".into(),
+            owner_user_id: Some(owner_id),
+            kind: MailboxKind::User,
+            quota_bytes: 1024,
+        })
+        .await
+        .expect("create mailbox");
+    let inbox = store
+        .ensure_default_folders(mailbox.id)
+        .await
+        .expect("create default folders")
+        .into_iter()
+        .find(|folder| folder.name == "INBOX")
+        .expect("find INBOX");
+    let raw = b"Subject: idempotent\r\n\r\nbody";
+    let first = store
+        .append_idempotent_for_user(
+            (tenant_id, owner_id),
+            inbox.id,
+            raw,
+            &[],
+            Utc::now(),
+            "append-test-001",
+        )
+        .await
+        .expect("append message");
+    let replay = store
+        .append_idempotent_for_user(
+            (tenant_id, owner_id),
+            inbox.id,
+            raw,
+            &[],
+            Utc::now(),
+            "append-test-001",
+        )
+        .await
+        .expect("replay original append");
+    assert_eq!(replay.id, first.id);
+    assert_eq!(replay.uid, first.uid);
+    assert!(matches!(
+        store
+            .append_idempotent_for_user(
+                (tenant_id, owner_id),
+                inbox.id,
+                b"Subject: changed\r\n\r\nbody",
+                &[],
+                Utc::now(),
+                "append-test-001",
+            )
+            .await,
+        Err(MailboxStoreError::IdempotencyConflict)
+    ));
+    let (message_count, used_bytes): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*)::BIGINT, mailbox.used_bytes
+         FROM mailbox_messages AS message
+         JOIN mailboxes AS mailbox ON mailbox.id = message.mailbox_id
+         WHERE message.mailbox_id = $1
+         GROUP BY mailbox.used_bytes",
+    )
+    .bind(mailbox.id)
+    .fetch_one(&pool)
+    .await
+    .expect("read idempotent append accounting");
+    assert_eq!(message_count, 1);
+    assert_eq!(used_bytes, raw.len() as i64);
+
+    sqlx::query("DELETE FROM mailboxes WHERE id = $1")
+        .bind(mailbox.id)
+        .execute(&pool)
+        .await
+        .expect("remove test mailbox");
+    sqlx::query("DELETE FROM domains WHERE id = $1")
+        .bind(domain_id)
+        .execute(&pool)
+        .await
+        .expect("remove test domain");
+    sqlx::query("DELETE FROM tenant_memberships WHERE tenant_id = $1")
+        .bind(tenant_id)
+        .execute(&pool)
+        .await
+        .expect("remove test membership");
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(owner_id)
+        .execute(&pool)
+        .await
+        .expect("remove test user");
+    sqlx::query("DELETE FROM tenants WHERE id = $1")
+        .bind(tenant_id)
+        .execute(&pool)
+        .await
+        .expect("remove test tenant");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL and migrations"]
+async fn concurrent_appends_never_overreserve_mailbox_quota() {
+    let pool = PgPoolOptions::new()
+        .max_connections(4)
+        .connect(&test_database_url())
+        .await
+        .expect("connect isolated test database");
+    let tenant_id = Uuid::new_v4();
+    let domain_id = Uuid::new_v4();
+    let owner_id = Uuid::new_v4();
+    insert_tenant_fixture(&pool, tenant_id, domain_id, owner_id).await;
+    let store = MailboxStore::from_pool(pool.clone(), 1024);
+    let mailbox = store
+        .create_mailbox(&CreateMailbox {
+            tenant_id,
+            domain_id,
+            local_part: format!("quota-{}", Uuid::new_v4().simple()),
+            display_name: "Concurrent quota test".into(),
+            owner_user_id: Some(owner_id),
+            kind: MailboxKind::User,
+            quota_bytes: 7,
+        })
+        .await
+        .expect("create quota-limited mailbox");
+    let inbox = store
+        .ensure_default_folders(mailbox.id)
+        .await
+        .expect("create default folders")
+        .into_iter()
+        .find(|folder| folder.name == "INBOX")
+        .expect("find INBOX");
+    let (first, second) = tokio::join!(
+        store.append(inbox.id, b"1234567", &[], Utc::now()),
+        store.append(inbox.id, b"abcdefg", &[], Utc::now())
+    );
+    assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
+    assert!(matches!(
+        (&first, &second),
+        (Err(MailboxStoreError::QuotaExceeded), Ok(_))
+            | (Ok(_), Err(MailboxStoreError::QuotaExceeded))
+    ));
+    let (message_count, used_bytes): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*)::BIGINT, mailbox.used_bytes
+         FROM mailbox_messages AS message
+         JOIN mailboxes AS mailbox ON mailbox.id = message.mailbox_id
+         WHERE message.mailbox_id = $1
+         GROUP BY mailbox.used_bytes",
+    )
+    .bind(mailbox.id)
+    .fetch_one(&pool)
+    .await
+    .expect("read concurrent append accounting");
+    assert_eq!(message_count, 1);
+    assert_eq!(used_bytes, 7);
+
+    sqlx::query("DELETE FROM mailboxes WHERE id = $1")
+        .bind(mailbox.id)
+        .execute(&pool)
+        .await
+        .expect("remove test mailbox");
+    sqlx::query("DELETE FROM domains WHERE id = $1")
+        .bind(domain_id)
+        .execute(&pool)
+        .await
+        .expect("remove test domain");
+    sqlx::query("DELETE FROM tenant_memberships WHERE tenant_id = $1")
+        .bind(tenant_id)
+        .execute(&pool)
+        .await
+        .expect("remove test membership");
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(owner_id)
+        .execute(&pool)
+        .await
+        .expect("remove test user");
+    sqlx::query("DELETE FROM tenants WHERE id = $1")
+        .bind(tenant_id)
+        .execute(&pool)
+        .await
+        .expect("remove test tenant");
 }

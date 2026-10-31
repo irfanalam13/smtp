@@ -54,6 +54,6 @@ inconsistent ownership across the API and mailbox services.
 
 ## Research references
 
-- [Control-plane schema](../../smtp-storage/postgres/000004_create_control_plane.up.sql)
-- [Mailbox tenant constraints](../../smtp-storage/postgres/000008_mailbox_platform.up.sql)
+- [Control-plane schema](../../smtp-storage/postgres/control_plane/000004_create_control_plane.up.sql)
+- [Mailbox tenant constraints](../../smtp-storage/postgres/mailbox/000008_mailbox_platform.up.sql)
 - [Tenant isolation strategy](phase-72-multi-tenant-database.md)

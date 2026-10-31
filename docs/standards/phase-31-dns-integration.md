@@ -16,8 +16,10 @@ typed record caching for A, AAAA, MX, PTR, and TXT records.
 
 ## Production requirements
 
-- Add TTL-aware positive and negative caching.
-- Expose DNSSEC authenticated-data and bogus states.
-- Enforce resolver timeouts, query limits, rebinding protections, and metrics.
+- Add DNSSEC status exposure and policy where the deployment requires it.
+- Add resolver instrumentation and a shared per-message DNS query budget.
+- Add operational DNS metrics and real fixture-domain evidence.
+- Maintain the bounded timeout, TTL cache, CNAME handling, and RFC-specific
+  SPF/DMARC lookup limits provided by the M07 resolver adapter.
 - Add A/AAAA fallback only according to the SMTP delivery policy.
 

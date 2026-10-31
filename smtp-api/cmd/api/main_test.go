@@ -100,6 +100,104 @@ func TestNewOIDCVerifierFromEnvRequiresCompleteConfiguration(t *testing.T) {
 	}
 }
 
+func TestBrowserSessionConfigRequiresSecureProductionOrigin(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		want bool
+	}{
+		{
+			name: "development defaults",
+			env:  map[string]string{"APP_ENVIRONMENT": "development"},
+			want: true,
+		},
+		{
+			name: "development HTTPS uses secure cookies",
+			env: map[string]string{
+				"APP_ENVIRONMENT":   "development",
+				"APP_PUBLIC_ORIGIN": "https://localhost:3210",
+			},
+			want: true,
+		},
+		{
+			name: "production secure defaults",
+			env: map[string]string{
+				"APP_ENVIRONMENT":   "production",
+				"APP_PUBLIC_ORIGIN": "https://app.example.test",
+			},
+			want: true,
+		},
+		{
+			name: "production rejects insecure origin",
+			env: map[string]string{
+				"APP_ENVIRONMENT":   "production",
+				"APP_PUBLIC_ORIGIN": "http://app.example.test",
+			},
+		},
+		{
+			name: "staging rejects insecure cookie prefix",
+			env: map[string]string{
+				"APP_ENVIRONMENT":          "staging",
+				"APP_PUBLIC_ORIGIN":        "https://stage.example.test",
+				"AUTH_SESSION_COOKIE_NAME": "smtp_session",
+			},
+		},
+		{
+			name: "non-development requires canonical origin",
+			env:  map[string]string{"APP_ENVIRONMENT": "staging"},
+		},
+		{
+			name: "development only permits loopback http",
+			env: map[string]string{
+				"APP_ENVIRONMENT":   "development",
+				"APP_PUBLIC_ORIGIN": "http://app.example.test",
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config, err := browserSessionConfigFromEnv(func(key string) string {
+				return test.env[key]
+			})
+			if (err == nil) != test.want {
+				t.Fatalf("browserSessionConfigFromEnv() = (%#v, %v), want success=%t", config, err, test.want)
+			}
+			if err == nil {
+				wantSecure := test.env["APP_ENVIRONMENT"] != "development" &&
+					test.env["APP_ENVIRONMENT"] != "dev" ||
+					strings.HasPrefix(test.env["APP_PUBLIC_ORIGIN"], "https://")
+				if config.SecureCookies != wantSecure {
+					t.Fatalf("SecureCookies=%t, want %t", config.SecureCookies, wantSecure)
+				}
+			}
+		})
+	}
+}
+
+func TestOIDCLoginConfigUsesOnlyTheImplementedSameOriginCallback(t *testing.T) {
+	disabled, err := newOIDCLoginFromEnv(func(string) string { return "" }, "https://app.example.test")
+	if err != nil || disabled != nil {
+		t.Fatalf("unset OIDC login config = (%v, %v), want disabled", disabled, err)
+	}
+	_, err = newOIDCLoginFromEnv(func(key string) string {
+		switch key {
+		case "OIDC_ISSUER_URL":
+			return "https://idp.example.test"
+		case "OIDC_CLIENT_ID":
+			return "smtp-dashboard"
+		case "OIDC_CLIENT_SECRET":
+			return "test-secret"
+		case "OIDC_REDIRECT_URI":
+			return "https://app.example.test/unimplemented-callback"
+		default:
+			return ""
+		}
+	}, "https://app.example.test")
+	if err == nil {
+		t.Fatal("OIDC login accepted a callback URL that does not match the implemented route")
+	}
+}
+
 func TestSecurityHeaders(t *testing.T) {
 	handler := securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

@@ -1,4 +1,4 @@
-.PHONY: help setup doctor infra-up infra-down infra-ps dev-bootstrap dev-up dev-run deploy-preflight dev-down fmt fmt-check lint test test-api test-queue test-delivery build check clean migrate-up migrate-down migrate-validate backup-postgres verify-postgres-backup validate-foundation-config
+.PHONY: help setup doctor infra-up infra-down infra-ps dev-bootstrap dev-up dev-run dev-imap deploy-preflight dev-down fmt fmt-check lint test test-api test-queue test-delivery test-imap build check clean migrate-up migrate-down migrate-validate backup-postgres verify-postgres-backup validate-foundation-config
 
 help:
 	@printf '%s\n' \
@@ -23,6 +23,7 @@ help:
 		'Legacy/ focused:' \
 		'  dev-bootstrap   Alias for setup' \
 		'  dev-run         Start the local application processes' \
+		'  dev-imap        Start the implicit-TLS IMAP service' \
 		'  test-api        Run Go API tests' \
 		'  test-queue      Run PostgreSQL queue integration tests' \
 		'  test-delivery   Run delivery crate tests' \
@@ -85,6 +86,9 @@ dev-up:
 dev-run:
 	./scripts/run-dev.sh
 
+dev-imap:
+	cargo run -p smtp-imap
+
 deploy-preflight:
 	./scripts/deploy-preflight.sh --production-env
 
@@ -120,6 +124,9 @@ test-api:
 test-delivery:
 	cargo test -p mail-delivery
 
+test-imap:
+	cargo test -p smtp-imap
+
 build:
 	cargo build --workspace --all-targets
 	cd smtp-api && go build ./...
@@ -130,11 +137,15 @@ clean:
 	rm -rf smtp-dashboard/.next smtp-dashboard/tsconfig.tsbuildinfo
 
 migrate-up:
-	docker run --rm --network host -v "$(PWD)/smtp-storage/postgres:/migrations:ro" migrate/migrate:v4.18.3 \
+	@set -eu; migration_dir=$$(mktemp -d); trap 'rm -rf "$$migration_dir"' EXIT; \
+		./scripts/stage-migrations.sh "$$migration_dir"; \
+		docker run --rm --network host -v "$$migration_dir:/migrations:ro" migrate/migrate:v4.18.3 \
 		-path=/migrations -database "$${DATABASE_URL:?Set DATABASE_URL}" up
 
 migrate-down:
-	docker run --rm --network host -v "$(PWD)/smtp-storage/postgres:/migrations:ro" migrate/migrate:v4.18.3 \
+	@set -eu; migration_dir=$$(mktemp -d); trap 'rm -rf "$$migration_dir"' EXIT; \
+		./scripts/stage-migrations.sh "$$migration_dir"; \
+		docker run --rm --network host -v "$$migration_dir:/migrations:ro" migrate/migrate:v4.18.3 \
 		-path=/migrations -database "$${DATABASE_URL:?Set DATABASE_URL}" down 1
 
 migrate-validate:

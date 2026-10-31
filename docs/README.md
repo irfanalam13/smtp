@@ -6,8 +6,10 @@
   bootstrap, normal startup, migrations, tests, and shutdown.
 - [Core infrastructure](development/core-infrastructure.md) — shared
   configuration, secrets, logging, context, events, and shutdown contracts.
-- [Project status](project-status.md) — what Milestones 0–6 implement and what
+- [Project status](project-status.md) — what Milestones 0–8 implement and what
   remains before production.
+- [Backend platform audit](backend-platform-audit.md) — M00 runtime wiring,
+  feature classifications, prioritized gaps, and baseline check results.
 - [Transactional email product scope](product/transactional-email-platform.md)
   — market references, customer page map, implementation sequence, and
   capability release gates.
@@ -66,5 +68,6 @@
 
 Documentation must describe implemented behavior honestly. In particular,
 development authentication, in-memory control-plane state, advisory DNS
-checks, disabled external delivery, and unsupported DKIM signing must not be
-presented as production capabilities.
+readiness checks, disabled-by-default external delivery, and the limited
+secret-mounted Ed25519 signing profile must not be presented as complete
+production capabilities.

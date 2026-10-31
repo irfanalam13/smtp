@@ -18,7 +18,7 @@ unless a later architecture decision assigns it a durable responsibility.
 
 ## PostgreSQL integration
 
-The shared [database module](../../smtp-core/src/database.rs) provides
+The shared [database module](../../smtp-core/src/platform/database.rs) provides
 validated `DATABASE_URL` configuration, bounded pool settings, an optional
 statement timeout, safe connection-string `Debug` redaction, and an explicit
 readiness query.
@@ -47,6 +47,20 @@ are immutable and forward-only:
 - `000013`: explicit tenant- versus user-bound API-key classification.
 - `000014`: inbound message/mailbox tenant-consistency constraint.
 - `000015`: optional OIDC issuer binding for provisioned user identities.
+- `000016`: API-key name uniqueness within an owner scope;
+- `000017`–`000018`: tenant-scoped SMTP credentials and shared auth controls;
+- `000019`: tenant/domain SMTP message-size policies;
+- `000020`: versioned parsed-message metadata for queue, inbound, and mailbox
+  records.
+- `000021`: durable per-recipient outbound delivery states and leases.
+- `000022`: shared PostgreSQL inbound rate-limit buckets keyed by HMAC digest.
+- `000023`: SMTP peer IP, receiving listener, and TLS state for accepted
+  inbound messages.
+- `000024`: safe inbound authentication summaries and quarantine status.
+- `000025`: authorized DMARC report aggregation, report outbox, and normalized
+  report ingestion with 90-day retention.
+- `000026`: mailbox append idempotency records, per-user/mailbox key scope,
+  request digest validation, and 30-day expiry.
 
 The database enforces primary keys, foreign keys, uniqueness, bounded lengths,
 state checks, and payload-size checks. Timestamps use `TIMESTAMPTZ`; persistence
@@ -62,7 +76,9 @@ disposable local databases.
 ## Transactions and consistency
 
 Queue enqueue writes the message, recipients, queue row, and idempotency record
-in one PostgreSQL transaction. Claim and lease updates use row locks with
+in one PostgreSQL transaction. Mailbox append writes its message, raw-byte
+quota charge, UID allocation, and scoped idempotency result atomically. Claim
+and lease updates use row locks with
 `FOR UPDATE SKIP LOCKED`; completion verifies the lease token. External event
 publication is not part of that transaction and is not claimed durable by this
 phase.
@@ -70,6 +86,8 @@ phase.
 Inbound persistence stores routing metadata and raw content in one database
 transaction before SMTP acceptance. The current prototype bounds raw content at
 10 MiB. It does not claim object-storage streaming or cross-store atomicity.
+Migration `000020` stores bounded RFC 5322/MIME metadata as a rebuildable
+projection; the exact raw bytes remain the canonical message payload.
 
 ## Security and lifecycle
 
@@ -88,8 +106,12 @@ not invent them.
 
 Migration `000012` binds newly issued API keys to their creating tenant member;
 older unbound keys are not authorized for mailbox reads and must be rotated.
-The Go API now uses PostgreSQL for mailbox list/message reads and key
-authentication. Other control-plane repositories, durable domain read models,
+The Go API authenticates and proxies mailbox HTTP requests to the Rust
+`mailbox-service`; the Rust service owns mailbox persistence and business
+invariants. Other control-plane repositories, durable domain read models,
 production retention, encrypted backup operations, and conditional
-object-storage/Redis adapters remain deferred. Their reasons and measured
-prerequisites are recorded in the [phase implementation status](../phase-status.md).
+object-storage/Redis adapters remain deferred. Mailbox append-key expiry is
+pruned in bounded batches on append and by the mailbox service's scheduled
+cleanup loop for quiet mailboxes. The inbound projection worker consumes
+accepted/quarantined events transactionally; it does not provide generic event
+delivery or production monitoring.

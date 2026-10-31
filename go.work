@@ -1,3 +1,6 @@
 go 1.26.10
 
-use ./smtp-api
+use (
+	./smtp-api
+	./smtp-auth
+)

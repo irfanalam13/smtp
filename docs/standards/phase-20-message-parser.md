@@ -1,14 +1,15 @@
 # Phase 20 — Message Parser
 
-Status: **Not implemented; design boundary documented**
+Status: **Bounded RFC 5322 projection implemented through `mail-parser`**
 
-The parser will provide bounded RFC 5322 header/body handling for inbound and
-queued messages. It must preserve raw bytes, parse CRLF header sections,
-validate folding, unfold only syntactically valid continuation lines, decode
-RFC 2047 presentation values, and retain malformed input diagnostics without
-turning untrusted headers into authorization data.
+The shared parser provides bounded RFC 5322 header/body handling for inbound,
+queued, mailbox, and API-generated messages. It preserves raw bytes separately,
+handles folded headers and RFC 2047 presentation values, and retains malformed
+transfer-encoding diagnostics. Header bytes/count, message size, nesting,
+part count, decoding, metadata size, and parser time are bounded. Parsed
+headers never authorize the SMTP envelope.
 
-Unicode normalization, address parsing, transfer decoding, and MIME parsing
-remain separate APIs. Parsing limits and malformed-message policy must be
-explicit and testable; parser output must never replace the immutable raw
-message retained for delivery and audit.
+SMTPUTF8/IDNA and authorization-grade address normalization remain separate,
+deferred end-to-end features. Transfer decoding and MIME projection are part of
+the shared parser. Parser output is a versioned projection and never replaces
+the immutable raw bytes retained for queueing, delivery, and audit.

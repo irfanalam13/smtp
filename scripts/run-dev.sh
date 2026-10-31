@@ -4,11 +4,13 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-worker_enabled=true
-if [[ "${1:-}" == "--no-worker" ]]; then
+worker_enabled=false
+if [[ "${1:-}" == "--worker" ]]; then
+  worker_enabled=true
+elif [[ "${1:-}" == "--no-worker" ]]; then
   worker_enabled=false
 elif [[ $# -gt 0 ]]; then
-  printf 'Usage: %s [--no-worker]\n' "$0" >&2
+  printf 'Usage: %s [--worker|--no-worker]\n' "$0" >&2
   exit 2
 fi
 
@@ -38,6 +40,8 @@ set +a
 : "${POSTGRES_HOST_PORT:=5432}"
 : "${DATABASE_URL:=postgres://smtp_dev:${POSTGRES_PASSWORD}@localhost:${POSTGRES_HOST_PORT}/smtp_platform?sslmode=disable}"
 : "${API_ADDR:=127.0.0.1:8080}"
+: "${MAILBOX_SERVICE_ADDR:=127.0.0.1:8081}"
+: "${MAILBOX_SERVICE_URL:=http://127.0.0.1:8081}"
 : "${CONTROL_PLANE_DEV_MODE:=true}"
 APP_ENVIRONMENT=development
 case "$API_ADDR" in
@@ -51,7 +55,31 @@ case "$API_ADDR" in
     exit 1
     ;;
 esac
+if [[ ! "${MAILBOX_SERVICE_HMAC_KEY:-}" =~ ^[[:xdigit:]]{64,}$ ]]; then
+  printf 'MAILBOX_SERVICE_HMAC_KEY must be at least 64 hexadecimal characters in .env.\n' >&2
+  exit 1
+fi
 export DATABASE_URL POSTGRES_HOST_PORT API_ADDR APP_ENVIRONMENT CONTROL_PLANE_DEV_MODE
+export MAILBOX_SERVICE_ADDR MAILBOX_SERVICE_URL MAILBOX_SERVICE_HMAC_KEY
+if [[ "$worker_enabled" == true && "${SMTP_DELIVERY_ENABLED:-false}" != "true" ]]; then
+  printf 'The outbound worker requires SMTP_DELIVERY_ENABLED=true in .env.\n' >&2
+  exit 1
+fi
+if [[ "$worker_enabled" == true && -z "${SMTP_RELAY_HOST:-}" && -z "${SMTP_DELIVERY_ALLOWLIST:-}" ]]; then
+  printf 'The outbound worker requires SMTP_DELIVERY_ALLOWLIST in .env.\n' >&2
+  printf 'For Gmail/Brevo delivery, configure SMTP_RELAY_* settings instead.\n' >&2
+  exit 1
+fi
+if [[ "$worker_enabled" == true &&
+  ( -n "${SMTP_RELAY_HOST:-}" || -n "${SMTP_RELAY_PORT:-}" ||
+    -n "${SMTP_RELAY_USERNAME:-}" || -n "${SMTP_RELAY_PASSWORD:-}" ||
+    -n "${SMTP_RELAY_FROM:-}" ) ]]; then
+  if [[ -z "${SMTP_RELAY_PORT:-}" || -z "${SMTP_RELAY_USERNAME:-}" ||
+    -z "${SMTP_RELAY_PASSWORD:-}" || -z "${SMTP_RELAY_FROM:-}" ]]; then
+    printf 'SMTP relay delivery requires host, port, username, password, and From settings in .env.\n' >&2
+    exit 1
+  fi
+fi
 
 children=()
 cleanup() {
@@ -86,10 +114,11 @@ start_process() {
 }
 
 start_process "API" go run ./smtp-api/cmd/api
+start_process "mailbox service" cargo run -p mailbox-service
 start_process "dashboard" pnpm dev:dashboard
 start_process "SMTP ingress" cargo run -p smtp-ingress
 if [[ "$worker_enabled" == true ]]; then
-  start_process "queue worker" cargo run -p mail-queue
+  start_process "outbound delivery worker" cargo run -p mail-delivery
 fi
 
 cat <<'EOF'

@@ -1,6 +1,7 @@
 # Phase 47 — MIME Parsing
 
-Status: **Bounded standards-oriented parsing foundation implemented; inbound pipeline integration and conformance suite pending**
+Status: **Bounded canonical parsing and durable queue/inbound/mailbox/API
+integration implemented; attachment scanning and broader conformance remain**
 
 ## Research baseline
 
@@ -18,18 +19,27 @@ HTML safe.
 
 ## Implemented code and gaps
 
-The `mail-parser` library is configured with explicit nesting and part bounds.
-`parse_message` extracts decoded subject/address fields, plain and HTML bodies,
-message/thread identifiers, inline and ordinary attachments, decoded payloads,
-and bounded warning counts. Input, part count, attachment count, and total
-decoded bytes are limited. MIME parser diagnostics are surfaced as warning
-counts rather than silently treated as clean.
+The shared version-1 canonical model keeps SMTP envelope metadata separate
+from RFC 5322 headers and retains exact raw bytes. The `mail-parser` library
+extracts decoded subject/address fields, plain and HTML bodies, message/thread
+identifiers, inline and ordinary attachments, decoded payloads, and bounded
+warning counts. Input/header bytes and counts, MIME depth, part count,
+attachment count, decoded bytes, aggregate transfer-decoding expansion,
+indexed metadata size, and parser deadline are limited. SMTP and mailbox
+callers use a shared four-worker blocking-parser pool; diagnostics are
+surfaced as warning counts rather than silently treated as clean.
 
-This is not yet a complete production ingestion pipeline. It needs RFC-indexed
-fixtures, fuzzing, CPU/time budgets, worker isolation, nested-message policy,
-message disposition/quarantine behavior, attachment scanner integration,
-encoded-word/address edge coverage, and an asynchronous durable projection
-writer. The parser is not an SMTP acceptor or a claim of full RFC conformance.
+Queue, inbound, and mailbox storage persist versioned bounded metadata beside
+the unchanged raw message. API-generated submissions persist matching indexed
+fields and fold generated headers safely. Tests cover folded/encoded headers,
+nested multipart, base64 and quoted-printable content, RFC 2231 filenames,
+inline parts, malformed transfer encoding, size/depth/part bounds, and
+PostgreSQL persistence.
+
+This is a bounded supported profile, not full RFC conformance. It does not
+enable SMTPUTF8/IDNA or archive extraction, and still needs attachment scanner
+integration, renderer-side HTML sanitization, larger interoperability
+fixtures, and projection rebuild workflows.
 
 **Why this remains open:** Parsing is currently a bounded component, not a
 production ingestion pipeline. It must be connected asynchronously to durable

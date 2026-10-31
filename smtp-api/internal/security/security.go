@@ -3,6 +3,8 @@ package security
 import (
 	"errors"
 	"strings"
+
+	smtpAuth "example.com/smtp-platform/smtp-auth"
 )
 
 type IdentityType string
@@ -17,6 +19,7 @@ type Identity struct {
 	UserID   string
 	TenantID string
 	Type     IdentityType
+	Role     string
 	Scopes   map[string]bool
 }
 
@@ -31,18 +34,21 @@ var (
 )
 
 func Authorize(identity Identity, permission string, resource Resource) error {
-	if strings.TrimSpace(identity.Subject) == "" ||
-		strings.TrimSpace(identity.TenantID) == "" ||
-		(identity.Type != HumanIdentity && identity.Type != ServiceIdentity) {
+	kind := smtpAuth.IdentityKind(identity.Type)
+	err := smtpAuth.Authorize(smtpAuth.Identity{
+		Subject: identity.Subject, UserID: identity.UserID, TenantID: identity.TenantID,
+		Kind: kind, Role: identity.Role, Scopes: identity.Scopes,
+	}, permission, resource.TenantID)
+	switch {
+	case errors.Is(err, smtpAuth.ErrUnauthenticated):
+		return ErrUnauthenticated
+	case errors.Is(err, smtpAuth.ErrInvalidIdentity):
 		return ErrInvalidIdentity
-	}
-	if resource.TenantID == "" || resource.TenantID != identity.TenantID {
+	case errors.Is(err, smtpAuth.ErrDenied):
 		return ErrDenied
+	default:
+		return err
 	}
-	if permission != "" && !identity.Scopes[permission] {
-		return ErrDenied
-	}
-	return nil
 }
 
 func RequireAuthenticated(identity Identity) error {

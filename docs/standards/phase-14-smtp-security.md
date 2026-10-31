@@ -1,7 +1,6 @@
 # Phase 14 — SMTP Security
 
-Status: **Secure transport foundation implemented; STARTTLS upgrade remains
-pending**
+Status: **Ingress STARTTLS and authenticated submission implemented**
 
 ## Research basis
 
@@ -20,29 +19,45 @@ pending**
 - Optional implicit TLS at connection acceptance using `TlsAcceptor`.
 - TLS failures are explicit connection errors; there is no plaintext fallback
   after a TLS handshake failure.
-- `AUTH` is refused with `538` on a plaintext session when
-  `require_tls_for_auth` is enabled (the default).
-- The existing AUTH verifier never receives credentials unless the transport
-  is marked as protected.
+- STARTTLS is advertised only when TLS material is configured and upgrades the
+  existing connection with a bounded handshake timeout.
+- Pipelined/buffered plaintext is rejected at the STARTTLS boundary. After a
+  successful handshake, EHLO and transaction state are reset.
+- AUTH PLAIN is advertised only after TLS and plaintext AUTH is rejected
+  before a challenge or credential-verifier call.
+- The PostgreSQL verifier scopes credential lookups to an active tenant,
+  stores versioned Argon2id hashes, and enforces expiry and revocation.
+- Authenticated `MAIL FROM` is accepted only for a verified domain owned by
+  the authenticated tenant; missing policy configuration fails closed.
+- Per-IP, per-tenant, and per-account authentication throttles, bounded
+  connections/commands, and graceful shutdown are implemented. Auth throttle
+  state is persisted in PostgreSQL and shared across ingress processes; bucket
+  identities are HMACed with a deployment-provided key.
+- SMTP credential list/create/rotate/revoke operations are available through
+  the tenant-scoped control-plane API. Generated passwords are shown once;
+  Argon2id hashes use the same parameters as SMTP verification, and lifecycle
+  events are audited transactionally.
+- Certificate/key files are polled every 30 seconds. A complete valid pair
+  replaces the active Rustls configuration atomically; failures retain the
+  last valid configuration.
 - TLS configuration is optional for local test mode and required when
   `implicit_tls` is enabled.
 
-## Not falsely advertised
-
-`STARTTLS` is still not advertised or accepted. Supporting it correctly
-requires upgrading the existing connection in-place, reassembling the live
-stream after the `220` response, resetting the SMTP transaction, and ensuring
-no pipelined plaintext is interpreted as TLS bytes. That refactor is the next
-security milestone; returning `502` is safer than accepting a command without
-performing encryption.
-
-The server also does not yet implement client-certificate authentication,
-certificate rotation, OCSP/stapling policy, cipher-suite reporting, or
-production secret-manager integration.
+Production configuration must provide the same `SMTP_RATE_LIMIT_HMAC_KEY` to
+all ingress replicas. The app supports manager-backed mounted secret files and
+environment injection; it does not call a specific cloud secret-manager API.
+Python's standard `smtplib` completes STARTTLS, AUTH PLAIN, and a submission
+transaction in the database-backed integration suite. A wider client matrix,
+client-certificate authentication, OCSP/stapling policy, and outbound
+delivery-worker integration remain unverified or unimplemented.
 
 ## Acceptance boundary
 
-The secure foundation is complete when certificate loading rejects missing or
-invalid material, implicit TLS performs a real Rustls handshake, plaintext
-AUTH is rejected, and TLS handshake failures do not downgrade. STARTTLS
-requires separate end-to-end tests for state reset and post-upgrade AUTH.
+The network suite verifies STARTTLS state reset, AUTH gating, a complete
+authenticated SMTP transaction, pipelined plaintext rejection, handshake
+failure without downgrade, connection limits, slow-client deadlines, and
+graceful shutdown. Unit tests verify TLS file rotation preserves the previous
+configuration on invalid replacement material. PostgreSQL integration tests
+verify shared lockout across instances, stored hashes, tenant isolation,
+expiry, rotation, and revocation when run against a disposable migrated
+PostgreSQL database, including verified-domain sender authorization.

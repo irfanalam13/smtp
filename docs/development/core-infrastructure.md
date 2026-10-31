@@ -2,18 +2,41 @@
 
 Phase 04 extends the existing `shared-types` crate at
 [`smtp-core/`](../../smtp-core/) rather than creating empty `core-*` crates.
-The crate is published internally as `shared-types` and contains focused
-modules:
+The crate is published internally as `shared-types` and groups implementation
+files by feature. `src/lib.rs` is the public facade and keeps the established
+module paths as re-exports so service crates can migrate independently.
+
+```text
+smtp-core/src/
+├── ai/                 feature extraction, retrieval, and suggestions
+├── attachments/        attachment metadata, scanning, and storage contracts
+├── authentication/     SPF/DKIM reference logic, DMARC policy, ARC, BIMI
+├── delivery/           delivery status notifications
+├── events.rs           shared event envelope and publisher contract
+├── mailbox/            mailbox models, rules, search, sync, and store
+│   └── store/          administration, messages, flags, labels, retention,
+│                       rules, submissions, and outbox operations
+├── message/            canonical MIME parsing and metadata
+├── platform/           configuration, context, database, errors, logging,
+│                       topology, runtime, and secret providers
+└── validation/         compliance fixture helpers
+```
+
+The former import paths (`ai_features`, `authentication_pipeline`,
+`mailbox_store`, `mime`, `config`, and related module names) remain available
+through the crate facade.
+
+The feature folders own these responsibilities:
 
 | Module | Responsibility |
 |---|---|
-| `config` | Environment enum, typed baseline configuration, defaults, and validation |
-| `secrets` | Validated secret keys, redacted values, and environment-backed local provider |
-| `context` | Distinct bounded correlation, request, and trace identifiers |
-| `errors` | Shared error class and safe infrastructure error wrapper |
+| `platform/config` | Environment enum, typed baseline configuration, defaults, and validation |
+| `platform/secrets` | Validated secret keys, redacted values, and environment-backed local provider |
+| `platform/context` | Distinct bounded correlation, request, and trace identifiers |
+| `platform/errors` | Shared error class and safe infrastructure error wrapper |
 | `events` | Versioned serializable envelope and publisher contract; no broker |
-| `logging` | Application-owned `tracing` subscriber initialization |
-| `runtime` | Explicit shutdown signal and bounded wait |
+| `platform/logging` | Application-owned `tracing` subscriber initialization |
+| `platform/runtime` | Explicit shutdown signal and bounded wait |
 
 ## Dependency direction
 

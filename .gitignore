@@ -13,3 +13,6 @@ backups
 .DS_Store
 .idea/
 .vscode/
+
+# Go API executable built by `go build ./cmd/api`.
+/smtp-api/api

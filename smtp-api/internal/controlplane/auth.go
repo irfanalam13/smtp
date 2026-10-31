@@ -26,6 +26,7 @@ func Require(p Principal, scope string) error {
 		UserID:   p.UserID,
 		TenantID: p.TenantID,
 		Type:     identityType(p),
+		Role:     string(p.Role),
 		Scopes:   p.Scopes,
 	}); err != nil {
 		return ErrUnauthorized
@@ -35,6 +36,7 @@ func Require(p Principal, scope string) error {
 		UserID:   p.UserID,
 		TenantID: p.TenantID,
 		Type:     identityType(p),
+		Role:     string(p.Role),
 		Scopes:   p.Scopes,
 	}, scope, security.Resource{TenantID: p.TenantID}); err != nil {
 		return ErrForbidden

@@ -23,6 +23,16 @@ if [[ ! -f .env ]]; then
   printf 'Created .env with a generated local PostgreSQL password.\n'
 fi
 
+mailbox_service_key="$(sed -n 's/^MAILBOX_SERVICE_HMAC_KEY=//p' .env | tail -n 1)"
+if [[ ! "$mailbox_service_key" =~ ^[[:xdigit:]]{64,}$ ]]; then
+  mailbox_service_key="$(openssl rand -hex 32)"
+  if grep -q '^MAILBOX_SERVICE_HMAC_KEY=' .env; then
+    sed -i "s/^MAILBOX_SERVICE_HMAC_KEY=.*/MAILBOX_SERVICE_HMAC_KEY=$mailbox_service_key/" .env
+  else
+    printf '\nMAILBOX_SERVICE_HMAC_KEY=%s\n' "$mailbox_service_key" >> .env
+  fi
+fi
+
 set -a
 # shellcheck disable=SC1091
 source .env

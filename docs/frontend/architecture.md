@@ -8,10 +8,11 @@ TypeScript. The only application route is `/`; dashboard sections are client
 side views within that route, not separate URLs. The UI calls the Go API
 through the same-origin `/api/backend/*` rewrite in `next.config.ts`.
 
-There are no shared frontend packages, API client package, state library,
-provider tree, or test runner today. The dashboard's browser-only token and
-tenant selection remain in memory. The Go API remains authoritative for
-authentication, authorization, domain verification, and queue state.
+There are no shared frontend packages, state library, or provider tree. The
+dashboard uses a small typed JSON client and Vitest with jsdom and React
+Testing Library for frontend unit and integration tests. The browser-only
+token and tenant selection remain in memory. The Go API remains authoritative
+for authentication, authorization, domain verification, and queue state.
 
 ## Source layout
 
@@ -32,23 +33,38 @@ smtp-dashboard/
     features/
       control-plane/
         components/
-          dashboard-sidebar.tsx
-          home-view.tsx
-          activity-view.tsx
-          api-keys-view.tsx
-          control-plane-dashboard.tsx
-          dashboard-primitives.tsx
-          domains-view.tsx
-          mailboxes-view.tsx
-          send-email-view.tsx
+          shell/
+            control-plane-dashboard.tsx
+            dashboard-sidebar.tsx
+          views/
+            overview-view.tsx
+            activity-view.tsx
+            api-keys-view.tsx
+            domains-view.tsx
+            mailboxes-view.tsx
+            mailbox-management-view.tsx
+            send-email-view.tsx
+            smtp-credentials-view.tsx
+          shared/
+            feedback-states.tsx
+            panel-heading.tsx
+            stat-card.tsx
+            submission-table.tsx
         hooks/
           use-control-plane-dashboard.ts
+          use-mailbox-management.ts
+          use-smtp-credentials.ts
         services/
           control-plane-api.ts
+          mailbox-management-api.ts
+          smtp-credentials-api.ts
         types/
           control-plane.ts
-        schemas/           # Empty scaffold
-        utils/             # Empty scaffold
+          mailbox-management.ts
+          smtp-credentials.ts
+        utils/
+          formatters.ts
+          validators.ts
       auth/                # Empty scaffold
       mail/                # Empty scaffold
       domains/             # Empty scaffold
@@ -62,8 +78,11 @@ smtp-dashboard/
     types/                 # Empty scaffold
     constants/             # Empty scaffold
   tests/
-    unit/                  # Empty scaffold
-    integration/           # Empty scaffold
+    unit/
+      json-client.test.ts
+      control-plane-api.test.ts
+    integration/
+      control-plane-dashboard.test.tsx
     e2e/                   # Empty scaffold
 ```
 
@@ -76,6 +95,10 @@ can preserve the future structure. They do not contain placeholder
 implementations or indicate that those capabilities or test runners are
 already implemented.
 
+The control-plane feature separates its console shell, selectable views, and
+reusable UI components into `components/shell/`, `components/views/`, and
+`components/shared/`. Formatting and input-validation helpers live in the
+feature's `utils/` folder.
 The control-plane dashboard navigation is a dedicated sidebar component with
 expandable product groups. Existing views remain selectable; future product
 areas appear disabled and marked “Soon” until their API and implementation
@@ -91,11 +114,14 @@ listed capability is available.
 - Feature views receive typed state and callbacks. They do not construct API
   requests themselves.
 - The feature service maps product operations to the existing Go API routes.
-  The shared JSON client handles headers, same-origin fetch, response parsing,
-  and API error messages.
+  The shared JSON client handles required authentication and tenant headers,
+  same-origin fetch, response parsing, cancellation, timeout, request IDs,
+  retry metadata, and typed API errors.
 - Do not move privileged API credentials into browser code. `API_URL` remains
   server-side Next.js configuration; user tokens remain transient browser
   input and are never persisted by the dashboard.
+- The mobile navigation is a focus-managed drawer; its backdrop, Escape key,
+  close action, and navigation selection return focus and restore body scroll.
 - Domain authorization and sender verification are server responsibilities.
   Frontend state and disabled controls are not authorization boundaries.
 
@@ -136,9 +162,9 @@ Use the root pnpm dashboard scripts or run the equivalent from
 ```sh
 pnpm lint:dashboard
 pnpm typecheck:dashboard
+pnpm --dir smtp-dashboard test
 pnpm build:dashboard
 ```
 
-The repository does not currently configure a frontend unit, integration, or
-browser-test runner. Do not add a competing test stack as part of routine
-organization; establish one when the project adopts a testing strategy.
+Vitest uses jsdom for unit and shell integration tests. Browser-level end-to-end
+coverage is not configured.

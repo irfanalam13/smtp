@@ -5,7 +5,7 @@ boundary.
 
 | Threat | Asset | Mitigation | Residual risk |
 |---|---|---|---|
-| Spoofing | API keys and development identity | CSPRNG keys, constant-time verification, expiry, revocation, dev-mode production guard | OIDC and operational key rotation remain deferred |
+| Spoofing | API keys, OIDC identities, password accounts, browser sessions, and development identity | CSPRNG credentials, Argon2id password verifiers, hashed single-use email tokens, token/ID-token purpose separation, OIDC issuer/audience/signature/time checks, exact subject mapping, hashed session secrets, CSRF/origin checks, revocation, dev-mode production guard | Named-provider interoperability, MFA, distributed rate limiting, and operational key rotation remain deferred |
 | Tampering | Tenant resources and authorization decisions | Typed identity, default-deny authorization, tenant resource matching, store checks | In-memory state is not a production persistence boundary |
 | Repudiation | Administrative and key operations | Structured audit events with actor, tenant, action, and target | Current adapter retains events in process memory |
 | Information disclosure | Secrets and message metadata | One-time secret display, redacted key listings, bounded message summaries, generic auth errors | Deployment logging and database controls require production integration |
@@ -14,7 +14,8 @@ boundary.
 
 ## Assumptions requiring validation
 
-- Production identity is supplied by an approved OIDC provider.
+- Production identity is supplied by an approved and configured OIDC provider;
+  login users are provisioned by exact issuer and subject before first use.
 - API-key storage is moved to the authoritative database with uniqueness and
   transaction guarantees.
 - Audit events are persisted durably and exported to an access-controlled sink.

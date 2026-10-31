@@ -21,21 +21,47 @@ transport, gateway, or service mesh.
   in error responses or list results.
 
 The machine-readable contract is [openapi.yaml](openapi.yaml). The API accepts
-PostgreSQL-backed API keys and, when configured, Keycloak OIDC bearer access
-tokens for pre-provisioned users. OIDC issuer, signature, expiration, and
+PostgreSQL-backed API keys and, when configured, OIDC bearer access tokens for
+pre-provisioned users. OIDC issuer, signature, expiration, issued-at, and
 dedicated API audience are verified; current user status, tenant membership,
 and permissions come from PostgreSQL. `X-Tenant-ID` selects an active
 membership when a user belongs to multiple tenants; it does not grant
 membership. Mailbox list/message reads additionally check user-bound mailbox
-permissions. Browser login/sessions, automated user provisioning, SAML, and
-durable domain/control-plane state remain unimplemented.
+permissions.
 
-To enable Keycloak token verification, set both `OIDC_ISSUER_URL` and
-`OIDC_API_AUDIENCE`. Configure the Keycloak realm to issue an API access token
-whose `aud` contains the dedicated API audience and whose `typ` claim is
-`Bearer`; the browser client's ID token is rejected. Users must already have a row in `users` with
-the exact issuer and subject and an active `tenant_memberships` row. Migration
-`000015` adds the identity issuer column. Do not link identities by email.
+The API also provides generic OIDC Authorization Code login with PKCE and
+server-managed browser sessions. Session credentials are opaque, stored only
+as database hashes, and delivered in HttpOnly cookies; state, nonce, verifier,
+and tenant selection are held in short-lived HttpOnly cookies. Sessions have
+idle and absolute expirations, can be listed/revoked per device or logged out
+globally, and use CSRF-token plus same-origin checks for unsafe requests.
+Identity resolution still requires exact issuer/subject provisioning and an
+active membership. The `/v1/auth/sessions` token-exchange route accepts only a
+verified OIDC API access token; an ID token is not accepted as an API bearer
+token.
+
+Email/password signup creates a new workspace with the registering user as
+owner. Password login requires a verified email and creates the same
+server-managed browser session as OIDC. Verification and password-recovery
+tokens are single-use, stored as hashes, and time-limited; password reset
+revokes the user's active sessions. These flows require the configured
+authentication SMTP relay and migration `000029`.
+
+This is not a complete identity platform: OIDC user provisioning,
+JWT refresh-token lifecycle, GitHub's OAuth identity API, per-tenant provider
+management, MFA/passkeys, invitations/account linking, and distributed
+authentication rate limits remain unimplemented. SAML and durable domain
+control-plane state also remain unimplemented.
+
+To enable OIDC API-token verification, set both `OIDC_ISSUER_URL` and
+`OIDC_API_AUDIENCE`. Configure the provider to issue an API access token whose
+`aud` contains the dedicated API audience and whose `typ` claim is `Bearer`;
+the browser client's ID token is rejected. For browser sign-in, also configure
+`OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`; the callback must be exactly
+`<APP_PUBLIC_ORIGIN>/api/backend/v1/auth/oidc/callback`. OIDC users must already have a row in `users` with the exact issuer and subject
+and an active `tenant_memberships` row. Migrations `000015`, `000028`, and
+`000029` add identity issuer, browser-session, and password-account storage,
+respectively. Do not link identities by email.
 
 Mailbox reads require a durable user identity plus mailbox permission. This
 can be a user-bound API key or a configured OIDC user whose membership is
@@ -51,7 +77,7 @@ go run ./cmd/bootstrap-key \
   --tenant-id <existing-tenant-uuid> \
   --user-id <existing-member-uuid> \
   --name mailbox-reader \
-  --scopes delivery:read
+  --scopes mailbox:read
 ```
 
 The command prints the secret once; transfer it directly to the approved
@@ -66,6 +92,23 @@ removed from the tenant; expired and revoked keys are rejected. No API key,
 including an owner-bound key, receives tenant-wide mailbox access: mailbox
 reads also require ownership or an explicit mailbox permission. `X-Dev-Subject`
 is not accepted for PostgreSQL mailbox reads.
+
+## SMTP credentials
+
+Tenant owners/admins can grant `smtp:credentials:read` for listing and
+`smtp:credentials:write` for create/rotate/revoke operations to a user-bound
+API key. Manage submission credentials through `GET`/`POST
+/v1/smtp-credentials`, `POST /v1/smtp-credentials/{id}/rotate`, and
+`POST /v1/smtp-credentials/{id}/revoke`. A generated password is returned
+only at create/rotation and is never included in list responses. Expiry
+defaults to 90 days and may be set up to one year. Management changes are
+written to the tenant audit table in the same PostgreSQL transaction.
+
+Use the returned `authcid` (the tenant UUID, a colon, and the username) as the
+SMTP AUTH PLAIN username. Transfer the one-time password directly into the
+approved secret manager; do not log it or store it in source control. SMTP
+authentication uses PostgreSQL-backed per-IP, per-tenant, and per-account
+throttling shared across ingress instances. See the [OpenAPI contract](openapi.yaml).
 
 Migration `000013` records whether a key is tenant- or user-bound. Apply
 migrations `000012` and `000013` in order, with API key issuance paused, before
@@ -90,9 +133,17 @@ replacement user-bound key. After `000013`, a user-bound key whose membership
 is removed remains classified as user-bound and is rejected; it does not fall
 back to tenant access.
 
-Mailbox lifecycle, alias, folder mutation, import/export, and synchronization
-routes remain unimplemented. Usage counters and DNS diagnostic cache remain
-process-local; this slice does not imply production readiness.
+Mailbox provisioning, lifecycle suspension/tombstoning, alias and permission
+administration, folder operations, append/copy/move, flags, labels, quota
+management, and bounded message-content reads are routed to the Rust mailbox
+service. Message append requires an `Idempotency-Key` and returns the original
+append result for an identical retry; using the key for different message
+bytes, folder, or flags returns `409`. Content/header/body reads are audited.
+Mailbox read access requires `mailbox:read`; writes and administration require
+`mailbox:write` and `mailbox:manage` respectively, and mailbox-level owner or
+grant checks are performed in PostgreSQL. Usage counters and DNS diagnostic
+cache remain process-local. Mailbox bytes remain inline PostgreSQL `BYTEA`,
+and this service slice does not imply production readiness.
 
 ## Message submission
 
@@ -107,18 +158,25 @@ for the authenticated tenant and requires `delivery:read`.
 
 The endpoint acknowledges queue acceptance only. The local worker uses a
 deterministic test processor, so `simulated_succeeded` is not remote SMTP
-delivery. SMTP AUTH, outbound transport integration, Sent-copy creation, and
-durable delivery/DSN events remain incomplete.
+delivery. TLS-secured SMTP AUTH is implemented in the separate SMTP ingress
+service; outbound worker integration, Sent-copy creation, and durable
+delivery/DSN events remain incomplete.
 
 The dashboard proxies `/api/backend/*` to the server-side `API_URL` origin
-(default `http://127.0.0.1:8080`) to keep browser requests same-origin. A
-development build uses the local development principal when no bearer token
-is provided. Other environments require a user-bound API key or OIDC access
+(default `http://127.0.0.1:8080` in development) to keep browser requests
+same-origin. The browser never calls the API origin directly, so the dashboard
+does not need permissive API CORS headers; do not add wildcard CORS as a
+workaround. Set `API_URL` on the Next.js server to an absolute HTTP(S) origin
+in non-development environments (use HTTPS in production). It is server-only
+and is not exposed as `NEXT_PUBLIC_API_URL`. A development build sends the
+local development principal when no bearer token is provided; the API accepts
+it only when `CONTROL_PLANE_DEV_MODE=true`, which must not be enabled in
+deployment. Other environments require a user-bound API key or OIDC access
 token; the dashboard keeps pasted tokens in memory only.
 
 ## Adding an endpoint
 
-1. Register the route in `internal/controlplane/handler.go`.
+1. Register the route in `internal/controlplane/routes.go`.
 2. Authenticate and require the narrowest permission before loading resources.
 3. Derive tenant scope from the authenticated principal.
 4. Bound and strictly decode request bodies.

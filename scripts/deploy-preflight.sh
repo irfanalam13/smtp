@@ -22,10 +22,20 @@ done
   printf 'CONTROL_PLANE_DEV_MODE must not be true for deployment.\n' >&2
   exit 1
 }
-[[ "${SMTP_DELIVERY_ENABLED:-false}" != "true" || -n "${SMTP_DELIVERY_ALLOWLIST:-}" ]] || {
-  printf 'External SMTP delivery requires an explicit SMTP_DELIVERY_ALLOWLIST.\n' >&2
-  exit 1
-}
+if [[ "${SMTP_DELIVERY_ENABLED:-false}" == "true" ]]; then
+  if [[ -n "${SMTP_RELAY_HOST:-}" || -n "${SMTP_RELAY_PORT:-}" ||
+    -n "${SMTP_RELAY_USERNAME:-}" || -n "${SMTP_RELAY_PASSWORD:-}" ||
+    -n "${SMTP_RELAY_FROM:-}" ]]; then
+    [[ -n "${SMTP_RELAY_PORT:-}" && -n "${SMTP_RELAY_USERNAME:-}" &&
+      -n "${SMTP_RELAY_PASSWORD:-}" && -n "${SMTP_RELAY_FROM:-}" ]] || {
+      printf 'SMTP relay delivery requires host, port, username, password, and From settings.\n' >&2
+      exit 1
+    }
+  elif [[ -z "${SMTP_DELIVERY_ALLOWLIST:-}" ]]; then
+    printf 'Direct SMTP delivery requires an explicit SMTP_DELIVERY_ALLOWLIST.\n' >&2
+    exit 1
+  fi
+fi
 
 make check
 cargo build --release --workspace

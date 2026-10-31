@@ -1,13 +1,16 @@
-pub mod config;
-pub mod error;
-pub mod model;
-pub mod processor;
-pub mod retry;
-pub mod store;
-pub mod worker;
+pub mod execution;
+pub mod queue;
 
-pub use config::QueueConfig;
-pub use error::QueueError;
-pub use model::{EnqueueRequest, EnqueueResult, FailureCategory, MessageId, QueueState};
-pub use processor::{Processor, TestProcessor, TestProcessorOutcome};
-pub use store::Queue;
+// Keep existing crate paths stable while organizing implementation by feature.
+pub use execution::{processor, worker};
+pub use queue::{config, error, model, retry, store};
+
+pub use execution::{
+    DeliveryBatchProcessor, DeliveryProcessingError, Processor, TestDeliveryBatchProcessor,
+    TestProcessor, TestProcessorOutcome, Worker,
+};
+pub use queue::{
+    ClaimedDeliveryBatch, ClaimedRecipient, DeadLetterItem, DeadLetterRecipient, EnqueueRequest,
+    EnqueueResult, FailureCategory, MessageId, Queue, QueueConfig, QueueError, QueueState,
+    RecipientDeliveryResult, RecipientDeliveryState,
+};

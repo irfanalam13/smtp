@@ -7,8 +7,12 @@ command -v docker >/dev/null 2>&1 || {
   exit 1
 }
 
+migration_dir=$(mktemp -d)
+trap 'rm -rf "$migration_dir"' EXIT
+"$PWD/scripts/stage-migrations.sh" "$migration_dir"
+
 docker run --rm --network host \
-  -v "$PWD/smtp-storage/postgres:/migrations:ro" \
+  -v "$migration_dir:/migrations:ro" \
   migrate/migrate:v4.18.3 \
   -path=/migrations -database "$DATABASE_URL" up
 

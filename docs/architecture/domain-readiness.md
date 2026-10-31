@@ -18,5 +18,8 @@ distributed quota implementation because the existing Go control plane is an
 in-memory development adapter. Production must move accounting into the
 PostgreSQL repository before multi-instance operation.
 
-The repository does not implement DKIM signing or private-key lifecycle
-management. No selector is guessed and no private key is generated or exposed.
+Inbound authentication and outbound signing are separate from these advisory
+diagnostics. The M07 SMTP ingress evaluates SPF/DKIM/DMARC, and outbound
+delivery can sign with Ed25519 keys mounted through `SMTP_DKIM_KEY_DIR`. The
+control plane still does not provide tenant DKIM key creation, rotation, or
+selector lifecycle endpoints.

@@ -32,6 +32,11 @@ code in `control-plane/` until a feature is deliberately extracted. Do not
 create folders for unimplemented contacts, billing, notifications, or other
 roadmap items.
 
+Within `control-plane/components/`, `shell/` owns the dashboard composition
+and sidebar, `views/` owns the selectable console screens, and `shared/` owns
+reusable display components such as headings, feedback states, statistic cards,
+and the submission table. Keep formatting helpers in `control-plane/utils/`.
+
 Empty scaffold directories contain only `.gitkeep` so Git tracks them. Remove
 the marker when adding the first real file to that directory. Do not add
 placeholder source files or create subdirectories for responsibilities that

@@ -8,7 +8,7 @@
 | Go API | `http://127.0.0.1:8080` | `go run ./smtp-api/cmd/api` |
 | Dashboard | `http://127.0.0.1:3000` | `pnpm dev:dashboard` |
 | SMTP ingress | `127.0.0.1:2525` | `cargo run -p smtp-ingress` |
-| Queue worker | database-backed local worker | `cargo run -p mail-queue` |
+| Outbound delivery worker | optional; external delivery disabled by default | `cargo run -p mail-delivery` |
 
 Use `./scripts/run-dev.sh` instead of starting these processes manually.
 
@@ -28,8 +28,10 @@ with:
 make dev-down
 ```
 
-The queue worker uses the deterministic test processor. It does not perform
-remote SMTP delivery.
+The development runner does not start outbound delivery by default. To run
+the real worker, configure `SMTP_DELIVERY_ENABLED=true` and an explicit
+`SMTP_DELIVERY_ALLOWLIST` in `.env`, then start with
+`./scripts/run-dev.sh --worker`. The worker sends real external SMTP.
 
 ## Health and diagnostics
 

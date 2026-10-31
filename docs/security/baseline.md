@@ -28,11 +28,14 @@
   tied to the MX hostname, and advertised STARTTLS failures never downgrade.
 - SMTP replies, message sizes, MX candidates, and connection attempts are
   bounded. Delivery diagnostics must not include message bodies or credentials.
-- The control plane supports scoped API keys and optional Keycloak OIDC
-  access-token validation for pre-provisioned users; the development-only
-  `X-Dev-Subject` adapter requires an explicit development environment.
-  Production browser sessions, user provisioning, and MFA policy remain
-  unimplemented. Never accept the local header outside development.
+- The control plane supports scoped API keys, OIDC access-token validation,
+  OIDC-backed browser sessions for pre-provisioned users, and verified
+  email/password browser accounts. Password accounts use Argon2id, expiring
+  single-use email tokens, and session revocation after password reset.
+  OIDC provisioning, GitHub OAuth identity, MFA/passkeys, and invitation/
+  account-linking flows remain unimplemented. The development-only
+  `X-Dev-Subject` adapter requires an explicit development environment; never
+  accept it elsewhere.
 - Tenant IDs come from the authenticated principal, not request payloads.
   Domains and API keys are checked at the service boundary before every
   operation. Authorization is default-deny and resource tenant scope must
@@ -49,8 +52,10 @@
 - DNS diagnostics use an injected resolver in tests, bounded timeouts, and
   tenant-scoped rate limits. Tenant-provided DNS servers or arbitrary network
   targets are never accepted.
-- SPF, DMARC, and MX results are advisory and never authorize a foreign sender,
-  alter DNS, or claim inbox placement. DKIM signing is not implemented.
+- Inbound SPF, DKIM, and DMARC use a standards-focused evaluator and local
+  policy dispositions; DNS results never authorize a foreign SMTP relay, alter
+  DNS, or claim inbox placement. Outbound DKIM signing is limited to configured
+  Ed25519 keys projected from the deployment secret manager.
 - The local bootstrap and runner scripts are development tools. They must not
   be used as a production supervisor, and `deploy-preflight.sh` validates but
   does not deploy.

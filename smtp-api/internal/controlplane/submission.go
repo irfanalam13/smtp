@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"mime"
 	"net/http"
 	"net/mail"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -22,11 +25,15 @@ import (
 const (
 	maxSubmissionBytes      = 10 * 1024 * 1024
 	maxSubmissionRecipients = 100
+	maxIndexedBodyTextBytes = 64 * 1024
+	maxIndexedMetadataBytes = 768 * 1024
 )
 
 type submissionRequest struct {
 	From    string   `json:"from"`
 	To      []string `json:"to"`
+	Cc      []string `json:"cc"`
+	Bcc     []string `json:"bcc"`
 	Subject string   `json:"subject"`
 	Text    string   `json:"text"`
 }
@@ -34,6 +41,8 @@ type submissionRequest struct {
 type normalizedSubmission struct {
 	From    string
 	To      []string
+	Cc      []string
+	Bcc     []string
 	Subject string
 	Text    string
 }
@@ -42,6 +51,8 @@ type Submission struct {
 	ID        string    `json:"id"`
 	From      string    `json:"from"`
 	To        []string  `json:"to"`
+	Cc        []string  `json:"cc"`
+	Bcc       []string  `json:"bcc"`
 	Subject   string    `json:"subject"`
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
@@ -52,23 +63,41 @@ func normalizeSubmission(input submissionRequest) (normalizedSubmission, error) 
 	if !validSubmissionAddress(from) {
 		return normalizedSubmission{}, ErrInvalid
 	}
-	if len(input.To) == 0 || len(input.To) > maxSubmissionRecipients {
+	if len(input.To)+len(input.Cc)+len(input.Bcc) == 0 ||
+		len(input.To)+len(input.Cc)+len(input.Bcc) > maxSubmissionRecipients {
 		return normalizedSubmission{}, ErrInvalid
 	}
 
-	recipients := make([]string, 0, len(input.To))
+	recipients := make([]string, 0, len(input.To)+len(input.Cc)+len(input.Bcc))
 	seen := make(map[string]struct{}, len(input.To))
-	for _, raw := range input.To {
-		recipient := strings.TrimSpace(raw)
-		if !validSubmissionAddress(recipient) {
-			return normalizedSubmission{}, ErrInvalid
+	normalizeRecipients := func(input []string) ([]string, error) {
+		result := make([]string, 0, len(input))
+		for _, raw := range input {
+			recipient := strings.TrimSpace(raw)
+			if !validSubmissionAddress(recipient) {
+				return nil, ErrInvalid
+			}
+			key := strings.ToLower(recipient)
+			if _, exists := seen[key]; exists {
+				return nil, ErrInvalid
+			}
+			seen[key] = struct{}{}
+			recipients = append(recipients, recipient)
+			result = append(result, recipient)
 		}
-		key := strings.ToLower(recipient)
-		if _, exists := seen[key]; exists {
-			return normalizedSubmission{}, ErrInvalid
-		}
-		seen[key] = struct{}{}
-		recipients = append(recipients, recipient)
+		return result, nil
+	}
+	to, err := normalizeRecipients(input.To)
+	if err != nil {
+		return normalizedSubmission{}, err
+	}
+	cc, err := normalizeRecipients(input.Cc)
+	if err != nil {
+		return normalizedSubmission{}, err
+	}
+	bcc, err := normalizeRecipients(input.Bcc)
+	if err != nil {
+		return normalizedSubmission{}, err
 	}
 
 	subject := strings.TrimSpace(input.Subject)
@@ -81,7 +110,7 @@ func normalizeSubmission(input submissionRequest) (normalizedSubmission, error) 
 	text := strings.ReplaceAll(input.Text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
 	text = strings.ReplaceAll(text, "\n", "\r\n")
-	return normalizedSubmission{From: from, To: recipients, Subject: subject, Text: text}, nil
+	return normalizedSubmission{From: from, To: to, Cc: cc, Bcc: bcc, Subject: subject, Text: text}, nil
 }
 
 func validSubmissionAddress(value string) bool {
@@ -123,11 +152,16 @@ func submissionFingerprint(submission normalizedSubmission) ([]byte, error) {
 func submissionMessage(submission normalizedSubmission, messageID string, now time.Time) []byte {
 	subject := mime.QEncoding.Encode("UTF-8", submission.Subject)
 	var message bytes.Buffer
-	fmt.Fprintf(&message, "From: %s\r\n", submission.From)
-	fmt.Fprintf(&message, "To: %s\r\n", strings.Join(submission.To, ", "))
-	fmt.Fprintf(&message, "Date: %s\r\n", now.UTC().Format(time.RFC1123Z))
-	fmt.Fprintf(&message, "Message-ID: <%s@smtp-platform.local>\r\n", messageID)
-	fmt.Fprintf(&message, "Subject: %s\r\n", subject)
+	writeFoldedHeader(&message, "From", submission.From)
+	if len(submission.To) > 0 {
+		writeFoldedHeader(&message, "To", strings.Join(submission.To, ", "))
+	}
+	if len(submission.Cc) > 0 {
+		writeFoldedHeader(&message, "Cc", strings.Join(submission.Cc, ", "))
+	}
+	writeFoldedHeader(&message, "Date", now.UTC().Format(time.RFC1123Z))
+	writeFoldedHeader(&message, "Message-ID", "<"+messageID+"@smtp-platform.local>")
+	writeFoldedHeader(&message, "Subject", subject)
 	message.WriteString("MIME-Version: 1.0\r\n")
 	message.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
 	message.WriteString("Content-Transfer-Encoding: base64\r\n")
@@ -142,6 +176,102 @@ func submissionMessage(submission normalizedSubmission, messageID string, now ti
 	return message.Bytes()
 }
 
+func writeFoldedHeader(message *bytes.Buffer, name, value string) {
+	line := name + ":"
+	for _, word := range strings.Fields(value) {
+		if len(line)+1+len(word) > 78 && line != name+":" {
+			message.WriteString(line)
+			message.WriteString("\r\n ")
+			line = word
+		} else if line == name+":" {
+			line += " " + word
+		} else {
+			line += " " + word
+		}
+	}
+	message.WriteString(line)
+	message.WriteString("\r\n")
+}
+
+func indexedSubmissionMetadata(message []byte) (map[string]any, error) {
+	parsed, err := mail.ReadMessage(bytes.NewReader(message))
+	if err != nil {
+		return nil, fmt.Errorf("parse generated submission headers: %w", err)
+	}
+	from, err := mail.ParseAddressList(parsed.Header.Get("From"))
+	if err != nil || len(from) != 1 {
+		return nil, fmt.Errorf("parse generated submission sender: invalid From header")
+	}
+	to, err := parseOptionalAddressList(parsed.Header.Get("To"))
+	if err != nil || len(to) > maxSubmissionRecipients {
+		return nil, fmt.Errorf("parse generated submission recipients: invalid To header")
+	}
+	cc, err := parseOptionalAddressList(parsed.Header.Get("Cc"))
+	if err != nil || len(to)+len(cc) > maxSubmissionRecipients {
+		return nil, fmt.Errorf("parse generated submission recipients: invalid Cc header")
+	}
+	subject, err := new(mime.WordDecoder).DecodeHeader(parsed.Header.Get("Subject"))
+	if err != nil {
+		return nil, fmt.Errorf("decode generated submission subject: %w", err)
+	}
+	messageID := strings.TrimSpace(parsed.Header.Get("Message-ID"))
+	messageID = strings.TrimSuffix(strings.TrimPrefix(messageID, "<"), ">")
+	if messageID == "" {
+		return nil, fmt.Errorf("parse generated submission message ID: missing Message-ID")
+	}
+	mediaType, parameters, err := mime.ParseMediaType(parsed.Header.Get("Content-Type"))
+	if err != nil || mediaType != "text/plain" || !strings.EqualFold(parameters["charset"], "utf-8") {
+		return nil, fmt.Errorf("parse generated submission content type: unsupported Content-Type")
+	}
+	if !strings.EqualFold(parsed.Header.Get("Content-Transfer-Encoding"), "base64") {
+		return nil, fmt.Errorf("parse generated submission body: unsupported transfer encoding")
+	}
+	text, err := io.ReadAll(io.LimitReader(
+		base64.NewDecoder(base64.StdEncoding, parsed.Body),
+		maxIndexedBodyTextBytes+1,
+	))
+	if err != nil {
+		return nil, fmt.Errorf("decode generated submission body: %w", err)
+	}
+	if len(text) > maxIndexedBodyTextBytes {
+		text = text[:maxIndexedBodyTextBytes]
+		for !utf8.Valid(text) {
+			text = text[:len(text)-1]
+		}
+	}
+	if !utf8.Valid(text) {
+		return nil, fmt.Errorf("decode generated submission body: invalid UTF-8")
+	}
+	recipients := make([]string, 0, len(to))
+	for _, recipient := range to {
+		recipients = append(recipients, recipient.Address)
+	}
+	ccRecipients := make([]string, 0, len(cc))
+	for _, recipient := range cc {
+		ccRecipients = append(ccRecipients, recipient.Address)
+	}
+	return map[string]any{
+		"subject":        subject,
+		"message_id":     messageID,
+		"in_reply_to":    nil,
+		"references":     []string{},
+		"from":           []string{from[0].Address},
+		"to":             recipients,
+		"cc":             ccRecipients,
+		"body_text":      []string{string(text)},
+		"body_html":      []string{},
+		"attachments":    []any{},
+		"parse_warnings": 0,
+	}, nil
+}
+
+func parseOptionalAddressList(value string) ([]*mail.Address, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+	return mail.ParseAddressList(value)
+}
+
 func submissionSubject(message []byte) (string, error) {
 	parsed, err := mail.ReadMessage(bytes.NewReader(message))
 	if err != nil {
@@ -154,6 +284,62 @@ func submissionSubject(message []byte) (string, error) {
 	return subject, nil
 }
 
+func (h Handler) sendingConfig(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.principal(w, r, "delivery:read"); !ok {
+		return
+	}
+	from := strings.TrimSpace(os.Getenv("SMTP_RELAY_FROM"))
+	JSON(w, http.StatusOK, map[string]any{
+		"relay_ready": smtpRelayReady(),
+		"from":        from,
+	})
+}
+
+func smtpRelayReady() bool {
+	port, err := strconv.Atoi(strings.TrimSpace(os.Getenv("SMTP_RELAY_PORT")))
+	host := strings.TrimSpace(os.Getenv("SMTP_RELAY_HOST"))
+	username := os.Getenv("SMTP_RELAY_USERNAME")
+	password := os.Getenv("SMTP_RELAY_PASSWORD")
+	from := strings.TrimSpace(os.Getenv("SMTP_RELAY_FROM"))
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("SMTP_DELIVERY_ENABLED")), "true") &&
+		validRelayHostname(host) &&
+		(err == nil && (port == 465 || port == 587)) &&
+		username != "" && len(username) <= 512 &&
+		password != "" && len(password) <= 512 &&
+		len(username)+len(password)+2 <= 360 &&
+		strings.IndexFunc(username+password, unicode.IsControl) < 0 &&
+		validSubmissionAddress(from)
+}
+
+func validRelayHostname(host string) bool {
+	if host == "" || len(host) > 253 || !utf8.ValidString(host) {
+		return false
+	}
+	host = strings.TrimSuffix(host, ".")
+	if host == "" {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 ||
+			!isASCIIAlphaNumeric(label[0]) ||
+			!isASCIIAlphaNumeric(label[len(label)-1]) {
+			return false
+		}
+		for _, character := range label {
+			if !(isASCIIAlphaNumeric(byte(character)) || character == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isASCIIAlphaNumeric(value byte) bool {
+	return value >= 'a' && value <= 'z' ||
+		value >= 'A' && value <= 'Z' ||
+		value >= '0' && value <= '9'
+}
+
 var errIdempotencyConflict = errors.New("idempotency key already used with a different submission")
 
 func (h Handler) submit(w http.ResponseWriter, r *http.Request) {
@@ -164,6 +350,10 @@ func (h Handler) submit(w http.ResponseWriter, r *http.Request) {
 	idempotencyKey := r.Header.Get("Idempotency-Key")
 	if !validIdempotencyKey(idempotencyKey) {
 		Error(w, http.StatusBadRequest, "invalid_request", "Idempotency-Key must be 1-256 ASCII letters, numbers, or - _ . :")
+		return
+	}
+	if !smtpRelayReady() {
+		Error(w, http.StatusServiceUnavailable, "smtp_relay_unavailable", "authenticated SMTP delivery is not configured")
 		return
 	}
 
@@ -183,11 +373,18 @@ func (h Handler) submit(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusBadRequest, "invalid_submission", "sender, recipients, subject, or message body is invalid")
 		return
 	}
+	relayFrom := strings.TrimSpace(os.Getenv("SMTP_RELAY_FROM"))
+	if !strings.EqualFold(submission.From, relayFrom) {
+		Error(w, http.StatusForbidden, "sender_not_authorized", "sender must match the configured SMTP relay sender")
+		return
+	}
 	if h.Postgres == nil {
 		Error(w, http.StatusServiceUnavailable, "submission_unavailable", "durable message queue is unavailable")
 		return
 	}
-	item, created, err := h.Postgres.EnqueueSubmission(r.Context(), principal, idempotencyKey, submission)
+	item, created, err := h.Postgres.EnqueueSubmissionWithRelaySender(
+		r.Context(), principal, idempotencyKey, submission, relayFrom,
+	)
 	switch {
 	case errors.Is(err, errIdempotencyConflict):
 		Error(w, http.StatusConflict, "idempotency_conflict", "Idempotency-Key was already used for a different submission")

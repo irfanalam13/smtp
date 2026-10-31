@@ -5,6 +5,18 @@ what remains, why it is not implemented yet, and when the remaining work should
 be applied. “Deferred” does not mean forgotten: each item has an owner phase or
 an explicit prerequisite.
 
+## Backend platform milestone M00 — audit and baseline
+
+**Status:** Complete for audit scope; this is not a production-readiness claim.
+
+The current executable wiring, feature classifications, prioritized
+defect/security register, SMTP capability check, and baseline validation
+results are recorded in the [M00 backend platform audit](backend-platform-audit.md).
+M01 has since implemented and tested ingress STARTTLS, TLS-only authenticated
+submission, tenant-scoped credential verification, connection throttling, and
+graceful session draining. The remaining queue-worker delivery gap is tracked
+under its own milestone; it is not part of M01.
+
 For the connected handoff analysis and the completion boundary through Phase
 10, see the [Phase 01–10 integration review](phase-integration.md).
 
@@ -12,10 +24,215 @@ The repository is intentionally a development and validation foundation. A
 feature must not be described as production-ready merely because its
 architecture, interface, prototype, or documentation exists.
 
+## Backend platform milestone M02 — SMTP protocol conformance and ESMTP profile
+
+**Status:** Complete for the selected bounded SMTP/ESMTP profile.
+
+The parser now enforces visible-ASCII command syntax, conservative dot-atom
+paths, strict CRLF, duplicate/unknown parameter rejection, ESMTP-only parameter
+negotiation, correct DATA dot transparency, and transaction reset after
+recoverable failures. EHLO exposes only configured `SIZE`, opt-in `8BITMIME`,
+TLS-available `STARTTLS`, and post-TLS `AUTH`. Declared and streamed message
+sizes are bounded by the global limit and, for authenticated submission, the
+persisted tenant and verified-sender-domain limits. 8BITMIME preserves octets
+only in declared message bodies; headers remain ASCII.
+
+The parser/TCP/PostgreSQL test suites cover the supported profile and its
+failure/recovery cases. PIPELINING, CHUNKING/BINARYMIME, SMTPUTF8, and DSN
+remain unadvertised and are deferred until their response-ordering, storage,
+Unicode, or recipient-delivery prerequisites are implemented.
+
+## Backend platform milestone M03 — canonical message and MIME pipeline
+
+**Status:** Bounded RFC 5322/MIME profile implemented and connected to the
+M05 queue-to-SMTP worker; the PostgreSQL-to-SMTP acceptance path has a
+disposable-database end-to-end test.
+
+SMTP, queue, inbound storage, mailbox append, and API-generated submissions
+now use schema-versioned message metadata while keeping envelope sender and
+recipients separate from RFC 5322 headers. Accepted raw bytes are stored
+unchanged. Queue, inbound, and mailbox rows persist parsed metadata under the
+same versioned JSONB contract; mailbox search/render projections are derived
+from the bounded metadata.
+
+The Rust `mail-parser` pipeline used by SMTP and mailbox storage covers folded
+and encoded headers, nested multipart bodies, transfer decoding, RFC 2231
+filenames, inline parts, and malformed-encoding warnings. API submissions are
+generated in a constrained text/plain profile and their metadata is derived
+from the generated raw message. The parser bounds raw input to an absolute 10 MiB limit,
+headers to 256 KiB and 200 fields (including nested messages), nesting depth
+to 16, parts to 1,000, attachments to 100, decoded content to 20 MiB and a
+20:1 aggregate expansion ratio, a two-second parsing deadline, and indexed
+text to 256 KiB. Decoded lengths and attachment counts are checked before
+transfer-decoding allocations. SMTP and mailbox callers share a four-worker
+parsing semaphore; timed-out blocking work retains its slot until it exits.
+Persisted metadata is capped at 768 KiB and database JSONB at 1 MiB. SMTP and
+queue configuration enforce the same 10 MiB ceiling as the raw-message
+storage constraints. Mailbox stores also apply this absolute ceiling before
+copying input; structurally invalid but size-bounded APPEND data is retained
+unchanged with an explicit parse-warning projection, while resource-limit
+failures reject the append.
+
+The PostgreSQL migration, queue/inbound/mailbox/API persistence, encoded and
+folded headers, nested MIME bounds, decoded-size preflight, API metadata
+derived from generated raw messages, and raw-byte preservation have focused
+tests. The outbound worker now reparses stored bytes using the persisted schema
+version before delivery. A disposable PostgreSQL queue-to-SMTP fixture test
+verifies that the canonical message reaches the SMTP peer and remote
+acceptance is persisted. SMTPUTF8/IDNA, archive extraction, attachment
+scanning, and broader mailbox projection/rebuild workflows remain out of this
+milestone.
+
+## Backend platform milestone M05 — outbound MTA delivery
+
+**Status:** In progress; recipient state, domain routing and a real delivery
+worker are implemented, but M05 is not production-ready or complete.
+
+Recipient deliveries and attempt history are persisted by migration 000021.
+The worker claims domain batches with database fencing, retries only
+temporary-failure recipients, records accepted/permanent/uncertain outcomes,
+and reparses the canonical stored message before transmission. The client
+routes by normalized domain, uses an exact-domain allowlist and validated IP
+pins, handles implicit/null MX semantics, and does not retry ambiguous
+post-DATA sends.
+
+The worker now renews fenced recipient and domain leases while an SMTP batch
+runs; failed renewal stops processing, and processor errors persist uncertain
+outcomes rather than leaving work to an implicit expiry. Renewal and expiry
+behavior are covered by PostgreSQL integration tests.
+
+Remaining acceptance work includes tenant/domain TLS policy; IP-level
+throttling and circuit breakers; delivery metrics and alerts; SMTP
+interoperability testing; plus a review of resolver caching, destination policy
+and operational rollout. MTA-STS/DANE, TLS reporting, connection reuse and
+authenticated smarthost delivery remain unimplemented. Do not describe M05 as
+complete or production-ready yet.
+
+## Backend platform milestone M06 — inbound MTA and durable local acceptance
+
+**Status:** Partially implemented; the bounded persistence path is wired, but
+the full production inbound pipeline is not complete.
+
+When `SMTP_INBOUND_ENABLED=true`, the SMTP executable requires PostgreSQL and
+constructs the inbound acceptor. It routes recipients only to active mailboxes
+on active tenants and verified domains. A message may fan out to multiple
+mailboxes in one tenant. Cross-tenant batches are rejected with a generic
+recipient error, and all copies plus mailbox-scoped recipient metadata commit
+in one PostgreSQL transaction before SMTP `250`. Retries are detected with a
+versioned, length-framed SHA-256 fingerprint and the stored sender, raw bytes,
+and recipient set are checked before treating a match as a duplicate.
+
+Additional M06 controls now include active primary and alias routing,
+transactional mailbox quota reservation, bounded ClamAV INSTREAM and
+SpamAssassin CHECK scanning, shared PostgreSQL per-IP/per-domain hourly rate
+limits with HMAC-pseudonymized keys, persisted peer/listener/TLS metadata, and
+one durable outbox event per accepted mailbox copy. Scanner outages fail closed
+with a temporary SMTP response; malware and spam policy matches receive a
+permanent rejection.
+
+M06 remains incomplete for a production hosted-mailbox service: the SMTP
+profile has no caller idempotency token, so identical intentional
+resubmissions can be indistinguishable from retries. The outbox has no inbound
+consumer, retention and object storage are missing, and listener metrics are
+process-local. SPF/DKIM/DMARC are now evaluated under M07 and their policy
+dispositions are integrated with durable inbound acceptance. See the
+[inbound design](architecture/inbound-mail.md) and
+[configuration reference](configuration.md).
+
+## Backend platform milestone M07 — DNS, SPF, DKIM, DMARC, and authentication
+
+**Status:** Core authentication and aggregate report generation/ingestion are
+implemented; managed key lifecycle controls and full conformance evidence
+remain incomplete.
+
+Inbound DNS evaluation uses the `mail-auth` implementation with the configured
+system resolver, DNSSEC validation, one concurrent upstream query, three-second
+query timeout, a 15-second whole-message deadline, bounded positive/negative
+TTL caches, CNAME handling, RFC 7208 SPF lookup limits, RFC 6376/RFC 8301/RFC
+8463 DKIM verification, and RFC 9989 DMARC policy discovery/alignment. At most
+four DKIM signatures and eight report destinations are evaluated per message.
+RSA-SHA1 results are excluded from DMARC alignment. A DMARC DNS temporary error defers the SMTP transaction;
+`p=reject` fails with SMTP `554`, and `p=quarantine` stores the message with a
+quarantine status and outbox event. Safe result tokens are stored with the raw
+message. The legacy simplified authentication helpers are not used for
+enforcement.
+
+Outbound real SMTP delivery requires a secret-manager projected DKIM key root.
+The current signer supports Ed25519-SHA256 keys in PKCS#8 DER files with
+restrictive permissions, and selects a key by the single From domain and
+`active-selector`. The `smtp-dkim-keygen` binary creates a key and prints the
+DNS TXT record. The `dkim-keyctl` binary activates a selector only after the
+DNSSEC-validated public key matches the private key and atomically retires
+inactive selectors after confirmed DNS removal and TTL expiry.
+
+RFC 9990 report data is captured without message bodies or recipient addresses,
+aggregated per UTC day and policy configuration, compressed as gzip XML, checked
+against authorized `rua` destinations and size limits at receipt and again
+before dispatch, persisted in an idempotent outbox, and sent through the
+standard outbound queue. Received
+aggregate XML/gzip can be validated and deduplicated by the ingestion command;
+normalized report data expires after 90 days. Forensic reports remain disabled.
+
+The remaining M07 technical work is tenant control-plane integration for key
+lifecycle/configuration, explicit DNS query-count budget
+accounting across SPF/DKIM/DMARC (the implementation currently relies on the
+protocol limits, four-signature/eight-destination caps, serial DNS requests and
+the 15-second deadline), outbound signing interoperability fixtures,
+RFC-indexed conformance vectors, and real fixture-domain evidence. ARC/BIMI and
+MTA-STS/TLS-RPT/DANE remain unsupported until the base conformance work is
+complete. M07 is not yet complete.
+
+## Backend platform milestone M08 — mailbox storage integration and administration
+
+**Status:** Partial vertical slice implemented; hosted-mailbox production
+acceptance remains incomplete.
+
+**Implemented:** The Go API authenticates user-bound principals and proxies
+mailbox calls to the Rust `mailbox-service` using a short-lived HMAC-signed
+principal bound to HTTP method, URI, body digest, and append idempotency key.
+The public API now reaches PostgreSQL-backed mailbox provisioning and reads,
+aliases, mailbox permissions, folder listing/create/rename/delete, message
+append/copy/move/flags/delete/expunge, labels, and quota reads/updates.
+Mailbox authorization uses active user membership plus mailbox ownership or
+an explicit mailbox grant; tenant owner/admin roles do not implicitly confer
+message access. The API uses separate `mailbox:read`, `mailbox:write`, and
+`mailbox:manage` scopes. Message append is transactionally idempotent for 30
+days, rejects key reuse with a different payload, and charges quota/allocates
+UID in the append transaction. Message content reads are audited. Same-folder
+move is a no-op and does not consume UID space. Folder deletion protects root
+INBOX and all special-use folders.
+
+Migration `000026` adds scoped append-idempotency records, a 30-day expiry, and
+an expiry index. Expired records are pruned in bounded batches during append
+and by a scheduled mailbox-service maintenance loop, including for quiet
+mailboxes. Rollback drops only this new idempotency table; it does not alter
+mailbox messages or existing customer data.
+
+Inbound accepted and quarantined outbox events are projected into mailbox
+messages by the Rust service. Projection allocates the target folder UID,
+inserts the message, and acknowledges the event in one transaction; failed
+events use persisted exponential retry delays. SMTP acceptance has already
+reserved the logical mailbox quota, so projection does not charge it again.
+The service integration test covers inbox/Junk routing, retries, folder
+creation, append replay, quota accounting, content reads, and audit records.
+
+**Remaining implementation:** Add integration coverage for lifecycle/
+permissions and concurrent lifecycle behavior, object storage and cleanup,
+durable synchronization operations, and backup/restore plus operational
+failure/recovery evidence. Outbound sent-copy/drafts projection remains
+outstanding. The inbound worker does not provide generic event publication or
+production monitoring. IMAP/POP3 protocol integration remains M09/M10.
+
+**Reason and application point:** The current M08 slice uses PostgreSQL inline
+message bytes and has no deployment identity provider for Go-to-Rust calls
+beyond the shared HMAC key. It is a useful authenticated integration boundary,
+not a hosted-mailbox or production-scale claim.
+
 ## Phase 11 — Email protocol engine
 
-**Status:** Foundation research and bounded envelope validation implemented;
-full protocol conformance remains in progress.
+**Status:** Foundation research, SMTP conformance profile, and bounded
+canonical message parsing implemented; remaining end-to-end extensions and
+mailbox protocol work remain in progress.
 
 **Implemented:** The [Phase 11 protocol-engine document](standards/phase-11-email-protocol-engine.md)
 records the RFC-backed message layers, lifecycle, acceptance boundary, and
@@ -23,9 +240,9 @@ deferred milestones. Queue validation now preserves the distinction between
 SMTP envelope paths and RFC 5322 message content, including support for the
 null reverse-path used by generated mail.
 
-**Remaining implementation:** Complete SMTP state/reply conformance fixtures,
-bounded MIME parsing, submission authentication, SMTPUTF8/IDNA, DKIM/DSN, and
-any selected mailbox protocol.
+**Remaining implementation:** SMTPUTF8/IDNA, DKIM/DSN, and any selected
+mailbox protocol. Authenticated submission is implemented under M01; bounded
+message parsing is implemented under M03.
 
 **Reason and application point:** These features have cross-service storage,
 security, and interoperability consequences. Apply them as dedicated
@@ -42,58 +259,80 @@ core transaction sequence and DATA framing, and keeps unsupported extensions
 unadvertised. The outbound SMTP client remains bounded and disabled for real
 external delivery by default.
 
-**Remaining implementation:** STARTTLS, submission authentication, DNS and
-destination policy, external-delivery enablement, PIPELINING, DSN,
-SMTPUTF8/REQUIRETLS, and interoperability testing are separate production
-hardening milestones.
+**Remaining implementation:** DNS and destination policy,
+external-delivery enablement, PIPELINING, DSN, SMTPUTF8/REQUIRETLS, and
+interoperability testing are separate production hardening milestones.
 
 ## Phase 13 — SMTP session state machine
 
-**Status:** Bounded submission state machine and injectable AUTH PLAIN flow
-implemented and tested.
+**Status:** Bounded submission state machine, STARTTLS reset, and TLS-backed
+AUTH PLAIN flow implemented and tested.
 
 **Implemented:** The session owns explicit connection, greeting,
 authentication, envelope, recipient, DATA, and closed states. `RSET` preserves
-authentication, AUTH continuation is bounded, credentials are delegated to an
-injectable verifier, and authentication is advertised only when configured.
+authentication, AUTH continuation is bounded, credentials are delegated to a
+tenant-scoped PostgreSQL verifier, and AUTH is advertised only after TLS.
 
-**Remaining implementation:** TLS-backed authentication, durable credential
-verification, STARTTLS state reset, production authorization policy, and
-external interoperability testing.
+**Remaining implementation:** Richer recipient policy and broader
+interoperability coverage beyond the M01 Python `smtplib` acceptance test.
 
 ## Phase 14 — SMTP security
 
-**Status:** Secure transport foundation implemented; STARTTLS upgrade remains
-pending.
+**Status:** Complete for the M01 specification and acceptance criteria.
 
 **Implemented:** Certificate-backed Rustls server configuration, optional
-implicit TLS, explicit TLS failure handling, and plaintext AUTH rejection by
-default.
+implicit TLS, in-place STARTTLS with SMTP state reset, TLS-only AUTH PLAIN,
+tenant-scoped Argon2id PostgreSQL credentials with expiry/rotation/revocation,
+verified-domain sender authorization, authentication throttling, explicit TLS
+failure handling, and graceful session draining.
 
-**Remaining implementation:** In-place STARTTLS upgrade and transaction reset,
-TLS-backed end-to-end AUTH tests, certificate rotation, client certificates,
-and production secret-manager integration.
+**Additional operational controls:** Tenant-scoped credential list endpoints
+require `smtp:credentials:read`; create/rotate/revoke endpoints
+require `smtp:credentials:write`. Generated passwords are returned once,
+expiry is enforced, and changes are audited transactionally.
+PostgreSQL-backed IP/tenant/account throttling is shared across ingress
+instances using a deployment-injected HMAC key. Mounted TLS certificate/key
+files reload every 30 seconds; invalid rotations retain the last valid
+configuration.
+
+**Acceptance evidence:** The SMTP TCP suite verifies plaintext AUTH rejection,
+STARTTLS state reset, invalid credentials, no TLS downgrade after handshake
+failure, pipelined plaintext rejection, connection exhaustion, slow-client
+deadlines, and graceful shutdown. Database-backed tests verify credential
+hashing, wrong-password/wrong-tenant/expired/revoked behavior, shared throttles,
+sender authorization, and a complete Python `smtplib` STARTTLS/AUTH/submission
+transaction. The CI PostgreSQL job runs the migration, Rust integration suite,
+and Go credential lifecycle integration test.
+
+**Beyond M01:** Wider client-matrix testing, direct cloud secret-manager API
+integration (deployment-managed secret mounts and environment injection are
+supported), client certificates, OCSP/stapling policy, and outbound delivery
+worker integration remain separate deployment or product work. M01's secure
+submission acceptance does not mean queued messages are delivered or that the
+whole platform is production-ready.
 
 ## Phase 15 — SMTP extensions (ESMTP)
 
-**Status:** Capability-gated `SIZE` and optional `8BITMIME` foundation
-implemented; the complete extension profile remains in progress.
+**Status:** Bounded `SIZE` and opt-in `8BITMIME` implemented and tested.
 
-**Implemented:** EHLO `SIZE`, bounded `MAIL FROM SIZE=`, opt-in `8BITMIME`,
-`BODY=7BIT|8BITMIME` parsing, and rejection of unknown ESMTP parameters.
+**Implemented:** Runtime-gated EHLO capabilities, strict `MAIL FROM` ESMTP
+parameter validation, global/tenant/domain size enforcement, and body-only
+8-bit transfer with raw-octet preservation.
 
-**Remaining implementation:** Safe `PIPELINING`, `CHUNKING`/`BDAT`,
-SMTPUTF8/Unicode storage and delivery, and DSN parameter and report handling.
-Unsupported extensions remain unadvertised.
+**Deferred by profile:** `PIPELINING`, `CHUNKING`/`BDAT`, SMTPUTF8/Unicode
+storage and delivery, and DSN parameters/reports remain unadvertised until
+their end-to-end prerequisites are implemented.
 
 ## Phases 16–20 — Queue, delivery, inbound, MIME, and message parsing
 
 The phase-specific contracts and current boundaries are documented under
 [`standards/`](standards/). Phase 16 has received a schema correction for the
-SMTP null reverse-path. The existing queue, delivery, and inbound components
-are foundations, not claims of Brevo/Google-scale production readiness.
-Phases 17–20 must be implemented in dependency order: queue outcomes,
-delivery/inbound storage, bounded message parsing, then MIME projection.
+SMTP null reverse-path. M03 now connects the bounded canonical parser to SMTP
+queueing, inbound acceptance, mailbox append, and API-generated submissions.
+This does not complete queue worker outcomes, external delivery, inbound
+routing, or attachment scanning. The existing queue, delivery, and inbound
+components remain bounded foundations, not claims of Brevo/Google-scale
+production readiness.
 
 ## Phases 21–25 — Mailbox protocols and storage
 
@@ -188,24 +427,26 @@ regional deployment decisions.
 **Status:** Architecture documented and aligned with the current prototype.
 
 **Implemented:** Service boundaries, message lifecycle, PostgreSQL-first
-durability, queue lease semantics, outbound destination safety, inbound opt-in
-scope, reliability assumptions, security boundaries, and extension paths are
-documented under [`architecture/phase-01/`](architecture/phase-01/).
+durability, queue lease semantics, outbound destination safety, inbound
+acceptance design, reliability assumptions, security boundaries, and
+extension paths are documented under [`architecture/phase-01/`](architecture/phase-01/).
 
 **Remaining implementation:**
 
-- Replace the in-memory Go control-plane store with PostgreSQL repositories.
+- Complete PostgreSQL coverage for remaining control-plane operations;
+  selected tenant/domain, API-key, submission, and mailbox paths are already
+  database-backed.
 - Choose the production deployment/runtime and service topology.
 - Define the production event publication adapter and delivery read model.
-- Complete sender authorization, bounce/suppression, and abuse-control
-  boundaries at the send API.
+- Extend verified-domain sender authorization with bounce/suppression and
+  abuse-control boundaries at the send API.
 - Decide whether hosted mailboxes and inbound reception are launch features.
 
 **Reason and application point:** Phase 01 intentionally established boundaries
 without implementing application services or locking in unvalidated cloud
-choices. Apply repository and deployment work in Phases 06, 08, 09, and 10;
-apply hosted-mailbox extensions only after a product decision and dedicated
-protocol/storage milestones.
+choices. Complete remaining repository and deployment work in Phases 06, 08,
+09, and 10; apply hosted-mailbox extensions only after a product decision and
+dedicated protocol/storage milestones.
 
 ## Phase 02 — Standards and RFC research
 
@@ -319,7 +560,9 @@ restore testing, and storage policies.
 
 **Remaining implementation:**
 
-- Replace in-memory control-plane state with PostgreSQL repositories.
+- Complete PostgreSQL-backed control-plane state; development identity and
+  usage/quota state remain process-local, while several core API paths already
+  use durable repositories.
 - Add durable quota, usage, delivery-event, bounce, suppression, and audit
   read models.
 - Define and implement production retention, deletion, and legal-hold rules.
@@ -335,9 +578,11 @@ justify the added consistency boundary.
 
 ## Phase 07 — Security foundation
 
-**Status:** Local security primitives and an optional Keycloak OIDC
-resource-server verifier are implemented; browser identity and key-management
-integrations remain deferred.
+**Status:** `smtp-auth` authorization/secret primitives, optional OIDC API
+resource-server verification, generic OIDC browser login, and PostgreSQL
+browser sessions, and self-service email/password account registration,
+verification, login, and recovery are implemented. OIDC provisioning and
+several production integrations remain deferred.
 
 **Implemented:** Typed human/service identities, default-deny authorization,
 resource tenant checks, scoped API-key verification, constant-time comparison,
@@ -347,12 +592,20 @@ and security regression tests.
 
 **Remaining implementation:**
 
-- Configure and operationalize the optional Keycloak OIDC resource-server
-  verifier; add browser sessions, user provisioning, and MFA policy.
-- Persist API-key verifiers and audit events through PostgreSQL repositories.
+- Configure and operationalize OIDC providers; implement OIDC user
+  provisioning, MFA/passkeys, invitations/account linking, GitHub's OAuth
+  identity API, and per-tenant provider management.
+- Add JWT access/refresh-token lifecycle only when a defined API client needs
+  bearer refresh tokens; current browser authentication uses revocable opaque
+  sessions.
+- Complete PostgreSQL persistence for audit events and remaining identity
+  state; API-key verifier persistence is already implemented for durable API
+  principals.
 - Integrate AWS Secrets Manager, KMS, certificate lifecycle, and key rotation.
 - Establish EKS workload identity or mTLS for internal service calls.
 - Add durable audit export, alerting, access review, and incident drills.
+- Replace process-local authentication rate limits with a distributed
+  deployment-backed limiter and verify provider interoperability.
 - Resolve the dependency advisories documented by the security workflow.
 
 **Reason and application point:** Keycloak, AWS KMS/Secrets Manager, and EKS
@@ -375,8 +628,9 @@ API developer guide describe the actual surface.
 
 **Remaining implementation:**
 
-- Replace the in-memory control-plane store with PostgreSQL-backed API
-  repositories.
+- Complete PostgreSQL-backed API coverage for the remaining development-store
+  operations and durable audit/quota state; selected core API routes already
+  use PostgreSQL repositories.
 - Add durable idempotency for externally visible mutations once the relevant
   database tables and operation semantics are approved.
 - Add authenticated internal service clients or RPC only when a second service
@@ -388,9 +642,9 @@ API developer guide describe the actual surface.
 - Add automated OpenAPI drift validation when a repository-supported validator
   is selected.
 
-**Reason and application point:** The current API has one Go HTTP consumer and
-an intentionally in-memory development store. Adding gRPC, a generic client,
-process-local idempotency, or a fake broker would create misleading guarantees.
+**Reason and application point:** The current API has one Go HTTP consumer and retains an in-memory development
+identity/store path and process-local usage counters. Adding gRPC, a generic
+client, process-local idempotency, or a fake broker would create misleading guarantees.
 Apply PostgreSQL-backed mutations and idempotency in the API/data-plane
 milestone after Phase 06 repositories are wired; apply internal identity and
 event delivery when multiple services communicate; apply distributed limits,
@@ -453,7 +707,8 @@ requirements-to-evidence matrix, and a prioritized risk register.
 **Remaining implementation:**
 
 - Remediate the failing RustSec findings before public production delivery.
-- Replace in-memory control-plane state with durable PostgreSQL repositories.
+- Complete PostgreSQL-backed control-plane coverage, including development
+  identity and usage/quota state that remain process-local.
 - Complete Keycloak user/session provisioning, AWS Secrets Manager/KMS,
   certificate management, and EKS service identity.
 - Deploy authenticated centralized metrics, logs, traces, dashboards, and
@@ -489,10 +744,11 @@ deployable object storage, encryption and key lifecycle, capacity/partition
 strategy backed by workload evidence, disaster recovery, and load/failover
 validation.
 
-**Reason and application point:** The current API store is process-local and
-message bytes remain in PostgreSQL. Apply the architecture incrementally in
-Phases 42–45; do not enable hosted mailbox traffic until storage, auth,
-retention, operations, and recovery criteria are evidenced.
+**Reason and application point:** Selected mailbox reads are PostgreSQL-backed,
+but mailbox writes, development identity/usage state, and message-byte object
+storage remain incomplete. Apply the architecture incrementally in Phases
+42–45; do not enable hosted mailbox traffic until storage, auth, retention,
+operations, and recovery criteria are evidenced.
 
 ## Phase 42 — User mailboxes
 
@@ -513,7 +769,7 @@ handlers. The read-only mailbox list/message routes are now PostgreSQL-backed.
 **Reason and application point:** Mailbox reads now use durable PostgreSQL
 repositories, but mailbox writes and lifecycle operations are not exposed
 through the Go API. Durable domain operations now use PostgreSQL; usage
-counters remain in-memory.
+counters and development identity remain process-local.
 Build authenticated writes on the durable mailbox schema and explicit
 owner/permission authorization rather than layering them over ephemeral state.
 
@@ -595,22 +851,21 @@ providers before exposing attachment endpoints.
 
 ## Phase 47 — MIME parsing
 
-**Status:** Bounded MIME parser implementation and multipart tests added;
-complete conformance and inbound integration remain pending.
+**Status:** Bounded MIME parsing and SMTP/inbound/mailbox integration
+implemented and tested.
 
 **Implemented:** A standards-oriented parser extracts encoded subject and
 addresses, nested plain/HTML bodies, embedded images, attachments, message
 references, and decode-warning counts under explicit input, nesting, part,
 attachment, and decoded-size limits.
 
-**Remaining implementation:** Parser-to-inbound/mailbox integration,
-quarantine/error policy, scanner handoff, extensive malformed/fuzz/RFC
-fixtures, CPU budgets and worker isolation, and safe HTML rendering.
+**Remaining implementation:** Quarantine/error policy, scanner handoff,
+extensive malformed/fuzz/RFC fixtures, and safe HTML rendering.
 
 **Reason and application point:** A parser projection must be attached to a
 durable message transaction without modifying the canonical RFC message.
-Enable indexing only after the asynchronous projection and quarantine
-contracts are available.
+MIME indexing is limited to bounded metadata fields; rendering must still
+treat HTML bodies as untrusted input.
 
 ## Phase 48 — Mail indexing
 
@@ -1064,11 +1319,14 @@ claims. Migration `000015` adds the identity issuer field. API responses have
 defensive browser/cache headers and bounded request headers. During graceful
 shutdown, readiness is withdrawn before the listener drains. Go tests cover
 the OIDC verifier and these safeguards; PostgreSQL-backed membership tests
-require an isolated database. Go vulnerability scanning is enforced in the
-security workflow; after upgrading to Go 1.26.10 and `golang.org/x/text`
-0.41.0, `govulncheck` reported no known vulnerabilities. This does not provide browser sessions, MFA
-policy enforcement, general RBAC/ABAC, workload identity, managed secrets,
-HSM, durable audit, or clustered HA.
+require an isolated database. Migration `000028` adds browser sessions with
+OIDC Authorization Code/PKCE, server-managed opaque session cookies, CSRF and
+same-origin checks, idle/absolute expiry, device revocation, and logout-all.
+Go vulnerability scanning is enforced in the security workflow; after
+upgrading to Go 1.26.10 and `golang.org/x/text` 0.41.0, `govulncheck` reported
+no known vulnerabilities. This does not provide user provisioning, MFA policy
+enforcement, full RBAC/ABAC administration, refresh tokens, workload identity,
+managed secrets, HSM, durable audit export, or clustered HA.
 
 **Remaining implementation:** Phase 101 EKS workload identity and service
 trust; Phase 102 user provisioning/deprovisioning, browser OIDC/session

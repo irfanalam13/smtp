@@ -1,6 +1,7 @@
 # Phase 45 — Message Metadata
 
-Status: **Schema projection foundation; parse, mutation, and API integration pending**
+Status: **Versioned bounded projections persist across queue, inbound, mailbox,
+and API submission paths; rebuild and richer mailbox workflows pending**
 
 ## Contract
 
@@ -27,10 +28,13 @@ tenant and mailbox authorization.
 
 Migration `000008` adds nullable header/conversation projections and a
 message-label relation while retaining the existing system-flag array and
-keywords table. The PostgreSQL append path now derives and persists a
-mailbox-scoped conversation link from MIME threading headers. Full bounded
-header/body projection, read/unread and priority APIs, thread reconciliation,
-label APIs, projection rebuilds, and search-index population remain pending.
+keywords table. Migration `000020` adds schema-versioned bounded parsed
+metadata to queue, inbound, and mailbox messages. SMTP/API submissions and
+mailbox append now persist search/render metadata while retaining exact raw
+bytes. The PostgreSQL append path derives a mailbox-scoped conversation link
+from MIME threading headers. Read/unread and priority APIs, thread
+reconciliation, label APIs, projection rebuilds, and asynchronous
+search-index population remain pending.
 
 **Why this remains open:** A few append-time fields do not amount to a complete
 metadata pipeline. Projections must be derived reliably from canonical bytes,

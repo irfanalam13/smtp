@@ -7,8 +7,9 @@ Verification date: **2026-10-29**
 
 Phase 12 provides a basic RFC 5321 SMTP server for local submission and
 loopback/inbound acceptance, plus the existing bounded outbound SMTP client.
-It does not claim public-production readiness: TLS, authentication, DNS
-policy, abuse controls, DKIM, DSN, and real external delivery remain separate
+Ingress STARTTLS and authenticated submission are implemented under M01. This
+phase does not claim public-production readiness: DNS policy, distributed
+abuse controls, DKIM, DSN, and real external delivery remain separate
 milestones.
 
 ## RFC 5321 profile
@@ -51,8 +52,8 @@ destination-safety policy.
 
 ## Deliberate exclusions
 
-- `AUTH` and `STARTTLS` are not advertised because this core profile does not
-  implement them.
+- STARTTLS and AUTH capabilities are implemented under M01 and are advertised
+  only when TLS material is configured and, for AUTH, the session is encrypted.
 - `PIPELINING`, `DSN`, `SMTPUTF8`, and `REQUIRETLS` are not advertised.
 - MIME decoding is not part of SMTP transport; raw message bytes are preserved
   for a later bounded parser.

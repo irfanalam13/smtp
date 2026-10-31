@@ -7,7 +7,7 @@ for the current change.
 ## Verified implementation map
 
 - `GET /v1/mailboxes` and the message list/get routes are registered in
-  `smtp-api/internal/controlplane/handler.go`. Mailbox reads use
+  `smtp-api/internal/controlplane/routes.go`. Mailbox reads use
   `PostgreSQLRepository`; durable domain operations and queue submissions also
   use PostgreSQL, while usage counters remain in the in-memory `Store`.
 - `smtp-api/cmd/api/main.go` requires `DATABASE_URL`, creates and pings a
@@ -25,8 +25,8 @@ for the current change.
 - The production identity provider remains undecided. ADRs `0006` and
   `phase-07/0001` explicitly defer OIDC/JWT until issuer, audience, and key
   discovery decisions are approved.
-- `smtp-core/src/mailbox_store.rs` contains durable mailbox workflows and an
-  outbox lease/ack primitive. `smtp-session/src/inbound.rs` contains an
+- `smtp-core/src/mailbox/store/mod.rs` contains durable mailbox workflows and an
+  outbox lease/ack primitive. `smtp-session/src/inbound/mod.rs` contains an
   inbound store adapter. The Go API has no mailbox mutation routes; message
   submissions are persisted to the queue but are not externally delivered.
 
@@ -40,8 +40,8 @@ isolated PostgreSQL integration run.
 - **Dependencies:** Existing migrations through `000012`; apply new migration
   `000013` before deploying the updated API.
 - **Files:** Go PostgreSQL authentication and mailbox guards in
-  `smtp-api/internal/controlplane/{postgres.go,handler.go}`; schema migration
-  `smtp-storage/postgres/000013_classify_api_key_principals.{up,down}.sql`;
+  `smtp-api/internal/controlplane/{postgres.go,routes.go}`; schema migration
+  `smtp-storage/postgres/control_plane/000013_classify_api_key_principals.{up,down}.sql`;
   integration tests and API/storage documentation.
 - **Database change:** Add `api_keys.principal_type`. Backfill keys with a
   creator as `user`; classify pre-existing keys without one as `tenant`.
@@ -96,7 +96,7 @@ token verifier until decisions are approved.
 - **Dependencies:** Milestone 1; API keys and optional Keycloak bearer-token
   authentication are available for provisioned principals. Define usage
   window and accounting semantics before schema selection.
-- **Files:** `smtp-api/internal/controlplane/handler.go`, new or extended
+- **Files:** `smtp-api/internal/controlplane/routes.go`, new or extended
   PostgreSQL repository code, startup wiring, tests, OpenAPI, and
   `docs/phase-status.md`.
 - **Database change:** The `domains` table already exists; use it for durable
@@ -132,8 +132,8 @@ token verifier until decisions are approved.
 
 - **Dependencies:** Stable message append/deduplication behavior, mailbox
   lifecycle APIs, event ownership, and a durable worker/deployment choice.
-- **Files:** `smtp-session/src/inbound.rs`, queue/delivery service boundaries,
-  Go API submission path, `smtp-core/src/mailbox_store.rs`, and durable
+- **Files:** `smtp-session/src/inbound/mod.rs`, queue/delivery service boundaries,
+  Go API submission path, `smtp-core/src/mailbox/store/mod.rs`, and durable
   outbox consumer/worker code.
 - **Database change:** Reuse existing inbox, sent-message, delivery projection,
   and outbox schema where sufficient; add a migration only for a documented

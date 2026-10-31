@@ -41,7 +41,10 @@ Never use a personal, shared, staging, or production database.
 - Multi-instance quota correctness.
 - A real outbound send endpoint.
 - DKIM signing and verification.
-- Full inbound PostgreSQL end-to-end coverage.
+- Full inbound PostgreSQL end-to-end coverage is opt-in via
+  `TEST_DATABASE_URL`; the ignored integration fixture now exercises
+  same-tenant primary/alias fan-out, cross-tenant atomic rejection, quota
+  rollback, outbox creation, and shared per-domain rate enforcement.
 - Load, chaos, backup-restore, and public-network SMTP tests.
 
 These are release-blocking gaps, not reasons to weaken existing safety checks.

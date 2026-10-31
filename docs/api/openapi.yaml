@@ -4,9 +4,10 @@ info:
   version: 1.0.0
   description: >
     Tenant-scoped control-plane API. Authentication uses durable PostgreSQL
-    API keys or optional Keycloak OIDC access tokens for pre-provisioned users.
-    OIDC users with multiple tenant memberships must select one using
-    X-Tenant-ID; membership is always resolved from PostgreSQL.
+    API keys, optional OIDC access tokens, or PostgreSQL-backed browser
+    sessions established through OIDC or verified email/password accounts.
+    Membership is always resolved from PostgreSQL. Browser session mutations
+    require a same-origin request and X-CSRF-Token.
 servers:
   - url: http://localhost:8080
 security:
@@ -14,13 +15,367 @@ security:
 tags:
   - name: Control plane
     description: Tenant-scoped control-plane operations; some non-mailbox state remains in-memory.
+  - name: Authentication
+    description: Email/password and OIDC browser sign-in, email verification, password recovery, session lifecycle, and CSRF-protected logout.
 paths:
+  /v1/auth/providers:
+    get:
+      summary: Report configured browser identity providers
+      description: Returns configuration state only; it does not expose provider secrets or metadata.
+      tags: [Authentication]
+      security: []
+      responses:
+        "200":
+          description: Provider configuration status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthProviders" }
+  /v1/auth/signup:
+    post:
+      summary: Register a password account and workspace
+      description: Creates an unverified owner account and sends a single-use email-verification link. Registration requires configured SMTP email delivery.
+      tags: [Authentication]
+      security: []
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema: { type: string, format: uri }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PasswordSignupRequest" }
+      responses:
+        "202":
+          description: A verification email was requested; account existence is not disclosed on conflicts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountEmailAction" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { description: Registration rate limit reached }
+        "503": { description: Account storage or email delivery is unavailable }
+  /v1/auth/login:
+    post:
+      summary: Sign in with a verified email/password account
+      description: Verifies the Argon2id password and active tenant membership, then creates the same opaque server-managed browser session used by OIDC. Never returns an access token.
+      tags: [Authentication]
+      security: []
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema: { type: string, format: uri }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PasswordLoginRequest" }
+      responses:
+        "200":
+          description: Browser session created and session/CSRF cookies set
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PasswordLoginResponse" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Email must be verified before sign-in }
+        "429": { description: Sign-in rate limit reached }
+        "503": { description: Authentication or session storage is unavailable }
+  /v1/auth/email/verify:
+    post:
+      summary: Verify an account email address
+      description: Consumes a single-use email-verification token. Tokens expire after 24 hours.
+      tags: [Authentication]
+      security: []
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema: { type: string, format: uri }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmailTokenRequest" }
+      responses:
+        "200": { description: Email address verified }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/auth/email/resend-verification:
+    post:
+      summary: Request another verification email
+      description: Sends an email only for an eligible account and uses a generic response to avoid account enumeration.
+      tags: [Authentication]
+      security: []
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema: { type: string, format: uri }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountEmailRequest" }
+      responses:
+        "202":
+          description: Request accepted without disclosing whether an eligible account exists
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountEmailAction" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { description: Email request rate limit reached }
+        "503": { description: Account email delivery is unavailable }
+  /v1/auth/password/forgot:
+    post:
+      summary: Request a password-reset email
+      description: Sends a single-use password-reset link when an eligible account exists. Responses do not disclose account existence; tokens expire after 30 minutes.
+      tags: [Authentication]
+      security: []
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema: { type: string, format: uri }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountEmailRequest" }
+      responses:
+        "202":
+          description: Request accepted without disclosing whether an eligible account exists
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountEmailAction" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { description: Recovery request rate limit reached }
+        "503": { description: Account email delivery is unavailable }
+  /v1/auth/password/reset:
+    post:
+      summary: Reset an account password
+      description: Consumes a single-use reset token, stores a new Argon2id password verifier, and revokes existing browser sessions.
+      tags: [Authentication]
+      security: []
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema: { type: string, format: uri }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PasswordResetRequest" }
+      responses:
+        "200": { description: Password changed and existing sessions revoked }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { description: Password reset rate limit reached }
+        "503": { description: Password recovery or account storage is unavailable }
+  /v1/auth/oidc/start:
+    get:
+      summary: Begin OIDC Authorization Code login
+      description: Requires an exact same-origin navigation. Sets short-lived HttpOnly state, nonce, and PKCE cookies, then redirects to the configured issuer.
+      tags: [Authentication]
+      security: []
+      parameters:
+        - name: tenant_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        "302": { description: Redirect to the configured OIDC provider }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { description: Authentication rate limit reached }
+        "503": { description: OIDC login is not configured }
+  /v1/auth/oidc/callback:
+    get:
+      summary: Complete OIDC login
+      description: Validates state, PKCE, nonce, issuer, signature, audience, and ID-token times; resolves an already-provisioned issuer/subject identity and sets browser session cookies.
+      tags: [Authentication]
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema: { type: string, maxLength: 4096 }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string, maxLength: 128 }
+      responses:
+        "303": { description: Redirect to the dashboard or login error state; successful login sets session and CSRF cookies }
+        "429": { description: Authentication rate limit reached }
+        "503": { description: OIDC identity or session storage is unavailable }
+  /v1/auth/sessions:
+    post:
+      summary: Exchange a verified OIDC API access token for a browser session
+      description: Accepts only a verified bearer access token, never an ID token. Requires a same-origin request and sets HttpOnly session and readable CSRF cookies.
+      tags: [Authentication]
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema: { type: string, format: uri }
+        - name: X-Tenant-ID
+          in: header
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        "201":
+          description: Session created; cookies are set in response headers
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSessionCreated" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { description: Authentication rate limit reached }
+        "503": { description: Authentication or session storage is unavailable }
+    get:
+      summary: List active browser sessions
+      tags: [Authentication]
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Active sessions for the authenticated user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSessionList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { description: Session storage is unavailable }
+  /v1/auth/sessions/{id}:
+    delete:
+      summary: Revoke one browser session
+      description: A session can only be revoked by its owner. Unsafe cookie-authenticated requests require matching Origin and X-CSRF-Token.
+      tags: [Authentication]
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Origin
+          in: header
+          required: true
+          schema: { type: string, format: uri }
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 40, maxLength: 128 }
+      responses:
+        "200": { description: Session revoked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { description: Session storage is unavailable }
+  /v1/auth/logout:
+    post:
+      summary: Revoke the current browser session
+      tags: [Authentication]
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema: { type: string, format: uri }
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 40, maxLength: 128 }
+      responses:
+        "200":
+          description: Session revoked and cookies cleared
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { description: Session storage is unavailable }
+  /v1/auth/logout-all:
+    post:
+      summary: Revoke every browser session for the current user
+      tags: [Authentication]
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema: { type: string, format: uri }
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 40, maxLength: 128 }
+      responses:
+        "200":
+          description: All sessions revoked and current cookies cleared
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { description: Session storage is unavailable }
+  /health/ready:
+    get:
+      summary: API readiness
+      description: Unauthenticated process and dependency readiness for the dashboard and deployment probes.
+      security: []
+      responses:
+        "200":
+          {
+            description: API is ready,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        required: [status],
+                        properties:
+                          { status: { type: string, enum: [ready] } },
+                      },
+                  },
+              },
+          }
+        "503":
+          {
+            description: API is not ready or is draining,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        required: [status],
+                        properties:
+                          { status: { type: string, enum: [not_ready] } },
+                      },
+                  },
+              }
+          }
   /v1/me:
     get:
       summary: Current authenticated principal
       tags: [Control plane]
       responses:
-        "200": { description: Principal and tenant role, content: { application/json: { schema: { type: object } } } }
+        "200":
+          {
+            description: Principal and tenant role,
+            content: { application/json: { schema: { type: object } } },
+          }
         "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
   /v1/tenants/current:
@@ -28,7 +383,11 @@ paths:
       summary: Current tenant
       tags: [Control plane]
       responses:
-        "200": { description: Tenant summary, content: { application/json: { schema: { type: object } } } }
+        "200":
+          {
+            description: Tenant summary,
+            content: { application/json: { schema: { type: object } } },
+          }
         "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
   /v1/domains:
@@ -39,7 +398,15 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Limit"
       responses:
-        "200": { description: Paginated domain list, content: { application/json: { schema: { $ref: "#/components/schemas/ListResponse" } } } }
+        "200":
+          {
+            description: Paginated domain list,
+            content:
+              {
+                application/json:
+                  { schema: { $ref: "#/components/schemas/ListResponse" } },
+              },
+          }
         "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
     post:
@@ -80,7 +447,13 @@ paths:
               additionalProperties: false
               properties:
                 name: { type: string, maxLength: 120 }
-                scopes: { type: array, minItems: 1, maxItems: 10, items: { type: string } }
+                scopes:
+                  {
+                    type: array,
+                    minItems: 1,
+                    maxItems: 10,
+                    items: { type: string },
+                  }
                 expires_at: { type: string, format: date-time, nullable: true }
       responses:
         "201": { description: One-time secret response }
@@ -89,19 +462,142 @@ paths:
     post:
       summary: Revoke an API key
       tags: [Control plane]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      parameters:
+        [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
         "200": { description: Revoked }
         "400": { $ref: "#/components/responses/InvalidRequest" }
         "404": { description: Not found without cross-tenant enumeration }
+  /v1/smtp-credentials:
+    get:
+      summary: List tenant-scoped SMTP credential metadata
+      description: Requires smtp:credentials:read. Passwords and hashes are never returned.
+      tags: [Control plane]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: SMTP credential metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/SMTPCredential" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { description: PostgreSQL is temporarily unavailable }
+    post:
+      summary: Create an SMTP credential; password is returned once
+      description: Requires smtp:credentials:write. Username is tenant-unique. Expiry defaults to 90 days and is limited to one year.
+      tags: [Control plane]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [username]
+              properties:
+                username: { type: string, minLength: 1, maxLength: 128 }
+                expires_at: { type: string, format: date-time }
+      responses:
+        "201":
+          description: One-time credential secret; use authcid as the SMTP AUTH PLAIN username
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SMTPCredentialSecret" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429":
+          {
+            description: Bounded Argon2id credential hashing is temporarily at capacity,
+          }
+        "503": { description: Credential storage is unavailable }
+  /v1/smtp-credentials/{id}/rotate:
+    post:
+      summary: Rotate an active SMTP credential; password is returned once
+      description: Requires smtp:credentials:write. The replacement password is returned only once.
+      tags: [Control plane]
+      parameters:
+        [
+          {
+            name: id,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          },
+        ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expires_at: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Rotated credential secret
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SMTPCredentialSecret" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429":
+          {
+            description: Bounded Argon2id credential hashing is temporarily at capacity,
+          }
+  /v1/smtp-credentials/{id}/revoke:
+    post:
+      summary: Revoke a tenant-scoped SMTP credential
+      description: Requires smtp:credentials:write.
+      tags: [Control plane]
+      parameters:
+        [
+          {
+            name: id,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          },
+        ]
+      responses:
+        "200": { description: Credential revoked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/domains/{id}:
+    delete:
+      summary: Disable a sending domain
+      description: Requires domains:write. Disabled domains can no longer be used as submission senders.
+      tags: [Control plane]
+      parameters:
+        [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Domain disabled }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/domains/{id}/verification:
     post:
       summary: Create a DNS verification challenge
       description: Durable authenticated accounts persist the challenge and verification state in PostgreSQL.
       tags: [Control plane]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      parameters:
+        [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
-        "201": { description: Verification record and one-time challenge secret }
+        "201":
+          { description: Verification record and one-time challenge secret }
         "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -110,7 +606,8 @@ paths:
       summary: Check a DNS verification challenge
       description: Checks the TXT record at _smtp-platform-verification.<domain> and persists successful verification for durable accounts.
       tags: [Control plane]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      parameters:
+        [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
         "200": { description: Verification status }
         "400": { $ref: "#/components/responses/InvalidRequest" }
@@ -119,6 +616,7 @@ paths:
   /v1/mailboxes:
     get:
       summary: List mailboxes readable by the authenticated tenant member
+      description: Requires mailbox:read and mailbox ownership or an explicit mailbox grant.
       tags: [Control plane]
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -126,41 +624,470 @@ paths:
         "200": { description: Bounded mailboxes readable by this tenant member }
         "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { description: The principal lacks user-bound mailbox permissions }
+        "403":
+          { description: The principal lacks user-bound mailbox permissions }
         "503": { description: PostgreSQL is temporarily unavailable }
+    post:
+      summary: Provision a mailbox with default folders
+      description: Requires mailbox:manage. Provisioning, default folders, and audit event are committed together.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [domain_id, local_part, display_name, kind, quota_bytes]
+              properties:
+                domain_id: { type: string, format: uuid }
+                local_part: { type: string, minLength: 1, maxLength: 64 }
+                display_name: { type: string, maxLength: 160 }
+                kind: { type: string, enum: [user, shared] }
+                quota_bytes: { type: integer, format: int64, minimum: 1 }
+                owner_user_id: { type: string, format: uuid, nullable: true }
+      responses:
+        "201": { description: Mailbox provisioned }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { description: Mailbox service is temporarily unavailable }
+  /v1/mailboxes/{mailbox_id}:
+    get:
+      summary: Read mailbox metadata
+      description: Requires mailbox:read and mailbox ownership or an explicit mailbox grant.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Mailbox metadata and raw-byte quota usage }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      summary: Suspend, reactivate, or tombstone a mailbox
+      description: Requires mailbox:manage. Tombstoning does not immediately purge retained data.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, suspended, deleting] }
+      responses:
+        "200": { description: Lifecycle state updated }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/mailboxes/{mailbox_id}/aliases:
+    get:
+      summary: List mailbox aliases
+      description: Requires mailbox:manage.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Mailbox alias addresses }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      summary: Add an alias on a verified tenant domain
+      description: Requires mailbox:manage. The canonical address registry prevents aliases shadowing primary addresses or other aliases.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [domain_id, local_part]
+              properties:
+                domain_id: { type: string, format: uuid }
+                local_part: { type: string, minLength: 1, maxLength: 64 }
+      responses:
+        "201": { description: Alias created }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/mailboxes/{mailbox_id}/permissions:
+    get:
+      summary: List mailbox grants
+      description: Requires mailbox:manage.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Users and mailbox-scoped permissions }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /v1/mailboxes/{mailbox_id}/messages:
     get:
       summary: List mailbox message metadata
+      description: Requires mailbox:read and mailbox ownership or an explicit mailbox grant. Use page_token for stable cursor pagination.
       tags: [Control plane]
       parameters:
-        - { name: mailbox_id, in: path, required: true, schema: { type: string } }
+        - {
+            name: mailbox_id,
+            in: path,
+            required: true,
+            schema: { type: string },
+          }
         - $ref: "#/components/parameters/Limit"
       responses:
         "200": { description: Bounded message metadata without raw bodies }
         "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { description: Missing delivery scope or user-bound key }
+        "403": { description: Missing mailbox:read scope or mailbox grant }
         "404": { $ref: "#/components/responses/NotFound" }
         "503": { description: PostgreSQL is temporarily unavailable }
+    post:
+      summary: Append a raw RFC 5322 message
+      description: Requires mailbox:write. Message bytes, metadata, quota, UID allocation, and the idempotency result commit in one transaction. Raw message bytes are limited to 10 MiB.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: folder_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128, pattern: "^[!-~]+$" }
+      requestBody:
+        required: true
+        content:
+          message/rfc822:
+            schema: { type: string, format: binary }
+      responses:
+        "201": { description: Appended message ID, folder, and UID }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: Idempotency key was reused with a different append request }
+        "413": { description: Message exceeds the mailbox service limit }
+        "507": { description: Mailbox raw-byte quota would be exceeded }
   /v1/mailboxes/{mailbox_id}/messages/{message_id}:
     get:
       summary: Get one message metadata
       tags: [Control plane]
       parameters:
-        - { name: mailbox_id, in: path, required: true, schema: { type: string } }
-        - { name: message_id, in: path, required: true, schema: { type: string } }
+        - {
+            name: mailbox_id,
+            in: path,
+            required: true,
+            schema: { type: string },
+          }
+        - {
+            name: message_id,
+            in: path,
+            required: true,
+            schema: { type: string },
+          }
       responses:
         "200": { description: Message metadata }
         "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { description: Missing delivery scope or user-bound key }
+        "403": { description: Missing mailbox:read scope or mailbox grant }
         "404": { description: Non-enumerating not found response }
         "503": { description: PostgreSQL is temporarily unavailable }
+    delete:
+      summary: Mark a message deleted
+      description: Requires mailbox:write. Permanent removal requires expunge.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: message_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Message marked deleted }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/mailboxes/{mailbox_id}/folders:
+    get:
+      summary: List mailbox folders, UIDVALIDITY, and UIDNEXT
+      description: Requires mailbox:read.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Folder hierarchy and synchronization identifiers }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      summary: Create a root or child folder
+      description: Requires mailbox:write. A folder parent must belong to this mailbox.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 255 }
+                parent_id: { type: string, format: uuid, nullable: true }
+                special_use: { type: string, enum: ["\\Sent", "\\Drafts", "\\Trash", "\\Archive", "\\Junk"], nullable: true }
+      responses:
+        "201": { description: Folder created with allocated UIDVALIDITY }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/mailboxes/{mailbox_id}/folders/{folder_id}:
+    patch:
+      summary: Rename a folder
+      description: Requires mailbox:write. Root INBOX cannot be renamed.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: folder_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties: { name: { type: string, minLength: 1, maxLength: 255 } }
+      responses:
+        "200": { description: Renamed folder and unchanged UIDVALIDITY }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      summary: Delete an empty folder
+      description: Requires mailbox:write. INBOX, special-use, non-empty, and parent folders cannot be deleted.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: folder_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Folder deleted }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/mailboxes/{mailbox_id}/aliases/{alias_id}:
+    delete:
+      summary: Remove a mailbox alias
+      description: Requires mailbox:manage.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: alias_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Alias removed }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/mailboxes/{mailbox_id}/permissions/{user_id}:
+    put:
+      summary: Grant or change mailbox access
+      description: Requires mailbox:manage. The user must have active membership in this tenant.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [permission]
+              properties: { permission: { type: string, enum: [read, read_write, manage] } }
+      responses:
+        "200": { description: Mailbox permission recorded }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      summary: Revoke mailbox access
+      description: Requires mailbox:manage. Membership revocation also removes mailbox grants.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Permission revoked }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/mailboxes/{mailbox_id}/messages/{message_id}/content:
+    get:
+      summary: Read canonical message bytes
+      description: Requires mailbox:read. Supports one HTTP byte range; access is audited.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: message_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Range, in: header, required: false, schema: { type: string } }
+        - { name: If-Range, in: header, required: false, schema: { type: string } }
+      responses:
+        "200": { description: Exact stored RFC 5322 bytes }
+        "206": { description: Requested byte range }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "416": { description: Invalid or unsatisfiable range }
+  /v1/mailboxes/{mailbox_id}/messages/{message_id}/headers:
+    get:
+      summary: Read message headers
+      description: Requires mailbox:read. Access is audited.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: message_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Stored RFC 5322 headers }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/mailboxes/{mailbox_id}/messages/{message_id}/body:
+    get:
+      summary: Read message body
+      description: Requires mailbox:read. Access is audited.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: message_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Stored RFC 5322 body bytes }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/mailboxes/{mailbox_id}/messages/{message_id}/flags:
+    patch:
+      summary: Replace system flags
+      description: Requires mailbox:write.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: message_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [flags]
+              properties:
+                flags:
+                  type: array
+                  maxItems: 5
+                  uniqueItems: true
+                  items: { type: string, enum: ["\\Seen", "\\Answered", "\\Flagged", "\\Deleted", "\\Draft"] }
+      responses:
+        "200": { description: Updated system flags }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/mailboxes/{mailbox_id}/messages/{message_id}/copy:
+    post:
+      summary: Copy a message to another folder in this mailbox
+      description: Requires mailbox:write. The copy receives a fresh target-folder UID and quota charge.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: message_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [target_folder_id]
+              properties: { target_folder_id: { type: string, format: uuid } }
+      responses:
+        "200": { description: Copy message ID and allocated UID }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "507": { description: Mailbox quota would be exceeded }
+  /v1/mailboxes/{mailbox_id}/messages/{message_id}/move:
+    post:
+      summary: Move a message to another folder in this mailbox
+      description: Requires mailbox:write. A folder change allocates a new target UID; same-folder moves are no-ops.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: message_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [target_folder_id]
+              properties: { target_folder_id: { type: string, format: uuid } }
+      responses:
+        "200": { description: Moved message and target UID }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/mailboxes/{mailbox_id}/folders/{folder_id}/expunge:
+    post:
+      summary: Permanently remove deleted folder messages
+      description: Requires mailbox:write. Message bytes and raw-byte quota are removed in the same transaction.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: folder_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Number of expunged messages }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/mailboxes/{mailbox_id}/quota:
+    get:
+      summary: Read mailbox raw-byte quota
+      description: Requires mailbox:read.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Used bytes and configured quota bytes }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      summary: Change mailbox raw-byte quota
+      description: Requires mailbox:manage. Quota cannot be reduced below current usage.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [quota_bytes]
+              properties: { quota_bytes: { type: integer, format: int64, minimum: 1 } }
+      responses:
+        "200": { description: Updated raw-byte quota }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: New quota is below current usage }
+  /v1/mailboxes/{mailbox_id}/labels:
+    get:
+      summary: List mailbox labels
+      description: Requires mailbox:read.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Labels and smart-label definitions }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      summary: Create a mailbox label
+      description: Requires mailbox:manage.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, kind]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 64 }
+                kind: { type: string, enum: [label, category, tag, smart] }
+                color: { type: string, pattern: "^#[0-9A-Fa-f]{6}$" }
+                query_definition: { type: object, nullable: true }
+      responses:
+        "201": { description: Label created }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /v1/domains/{id}/checks:
     post:
       summary: Run bounded DNS diagnostics for a tenant domain
       tags: [Control plane]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      parameters:
+        [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
         "200": { description: Advisory SPF, DMARC, MX, and ownership results }
         "400": { $ref: "#/components/responses/InvalidRequest" }
@@ -170,9 +1097,16 @@ paths:
       summary: Get the most recent domain readiness result
       description: DNS diagnostics are cached in process memory and reset on API restart.
       tags: [Control plane]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      parameters:
+        [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
-        "200": { description: Explicit ready, degraded, action_required, or checking state }
+        "200":
+          {
+            description: Explicit ready,
+            degraded,
+            action_required,
+            or checking state,
+          }
         "400": { $ref: "#/components/responses/InvalidRequest" }
   /v1/usage:
     get:
@@ -181,6 +1115,23 @@ paths:
       responses:
         "200": { description: Tenant-scoped usage and configured limit }
         "400": { $ref: "#/components/responses/InvalidRequest" }
+  /v1/sending/config:
+    get:
+      summary: Get the authenticated SMTP sending configuration status
+      description: Returns whether the server-side shared SMTP relay is ready and its permitted From address. Credentials are never returned.
+      tags: [Control plane]
+      responses:
+        "200":
+          description: SMTP relay readiness and permitted sender
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [relay_ready, from]
+                properties:
+                  relay_ready: { type: boolean }
+                  from: { type: string, format: email }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /v1/submissions:
     get:
       summary: List recent messages submitted by this tenant through the API
@@ -189,20 +1140,40 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Limit"
       responses:
-        "200": { description: Recent tenant-scoped submissions, content: { application/json: { schema: { $ref: "#/components/schemas/SubmissionListResponse" } } } }
+        "200":
+          {
+            description: Recent tenant-scoped submissions,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      { $ref: "#/components/schemas/SubmissionListResponse" },
+                  },
+              },
+          }
         "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { description: Missing delivery:write scope or sender domain is not verified }
+        "403":
+          {
+            description: Missing delivery:read scope,
+          }
         "503": { description: Queue storage is temporarily unavailable }
     post:
       summary: Submit a plain-text message to the durable queue
-      description: Queue acceptance does not mean the message was delivered. Durable accounts must use a sender address on a verified tenant domain; external delivery remains disabled in the local development worker.
+      description: Sends through the server-configured authenticated SMTP relay. Queue acceptance does not guarantee inbox placement. The From address must match the configured relay sender.
       tags: [Control plane]
       parameters:
         - name: Idempotency-Key
           in: header
           required: true
-          schema: { type: string, minLength: 1, maxLength: 256, pattern: "^[A-Za-z0-9._:-]+$" }
+          schema:
+            {
+              type: string,
+              minLength: 1,
+              maxLength: 256,
+              pattern: "^[A-Za-z0-9._:-]+$",
+            }
       requestBody:
         required: true
         content:
@@ -210,17 +1181,28 @@ paths:
             schema:
               $ref: "#/components/schemas/SubmissionRequest"
       responses:
-        "202": { description: Accepted into the durable queue, content: { application/json: { schema: { $ref: "#/components/schemas/SubmissionAccepted" } } } }
+        "202":
+          {
+            description: Accepted into the durable queue,
+            content:
+              {
+                application/json:
+                  {
+                    schema: { $ref: "#/components/schemas/SubmissionAccepted" },
+                  },
+              },
+          }
         "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
-        "413": { description: Submission request exceeds the configured size limit }
-        "503": { description: Queue storage is temporarily unavailable }
+        "413":
+          { description: Submission request exceeds the configured size limit }
+        "503": { description: Queue storage or authenticated SMTP delivery is unavailable }
   /v1/submissions/{id}/attempts:
     get:
-      summary: List tenant-scoped queue attempts for a submission
-      description: Returns recorded queue attempts, which may be simulated in development and do not prove external SMTP delivery.
+      summary: List tenant-scoped SMTP delivery attempts for a submission
+      description: Returns per-recipient relay results, SMTP status codes, and retry diagnostics.
       tags: [Control plane]
       parameters:
         - name: id
@@ -229,7 +1211,7 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200":
-          description: Queue attempts in attempt order
+          description: Recipient delivery attempts in chronological order
           content:
             application/json:
               schema:
@@ -240,20 +1222,37 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [id, attempt_number, started_at, outcome]
+                      required: [id, attempt_number, recipient, started_at, outcome]
                       properties:
                         id: { type: integer, format: int64 }
                         attempt_number: { type: integer, minimum: 1 }
+                        recipient: { type: string, format: email }
                         started_at: { type: string, format: date-time }
-                        finished_at: { type: string, format: date-time, nullable: true }
-                        outcome: { type: string, enum: [simulated_success, failure] }
+                        finished_at:
+                          { type: string, format: date-time, nullable: true }
+                        outcome:
+                          {
+                            type: string,
+                            enum:
+                              [
+                                in_progress,
+                                accepted_by_remote,
+                                temporary_failure,
+                                permanent_failure,
+                                uncertain,
+                                suppressed,
+                              ],
+                          }
                         error_category: { type: string, nullable: true }
                         diagnostic: { type: string, nullable: true }
+                        smtp_code: { type: integer, nullable: true }
+                        remote_host: { type: string, nullable: true }
         "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "503": { description: Queue activity storage is temporarily unavailable }
+        "503":
+          { description: Queue activity storage is temporarily unavailable }
 components:
   parameters:
     Limit:
@@ -264,47 +1263,205 @@ components:
   responses:
     InvalidRequest:
       description: Invalid request/query or an OIDC user's required tenant selection is missing
-      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+        }
     Unauthorized:
       description: Authentication required
-      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+        }
     Forbidden:
       description: Permission denied
-      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+        }
     Conflict:
       description: Resource conflict
-      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+        }
     NotFound:
       description: Resource not found
-      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+        }
   schemas:
+    AuthProviders:
+      type: object
+      required: [oidc_enabled, password_login_enabled, signup_enabled, password_reset_enabled]
+      properties:
+        oidc_enabled: { type: boolean }
+        password_login_enabled: { type: boolean }
+        signup_enabled: { type: boolean }
+        password_reset_enabled: { type: boolean }
+    PasswordSignupRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password, organization_name]
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+        password: { type: string, minLength: 12, maxLength: 1024, format: password }
+        organization_name: { type: string, minLength: 1, maxLength: 160 }
+    PasswordLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+        password: { type: string, minLength: 1, maxLength: 1024, format: password }
+        tenant_id: { type: string, format: uuid }
+    PasswordLoginResponse:
+      type: object
+      required: [status, user_id, tenant_id, expires_at]
+      properties:
+        status: { type: string, enum: [authenticated] }
+        user_id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        expires_at: { type: string, format: date-time }
+    EmailTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token: { type: string, minLength: 40, maxLength: 128 }
+    AccountEmailRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+    PasswordResetRequest:
+      type: object
+      additionalProperties: false
+      required: [token, new_password]
+      properties:
+        token: { type: string, minLength: 40, maxLength: 128 }
+        new_password: { type: string, minLength: 12, maxLength: 1024, format: password }
+    AccountEmailAction:
+      type: object
+      required: [status, message]
+      properties:
+        status: { type: string, enum: [accepted, verification_pending] }
+        message: { type: string }
+        tenant_id: { type: string, format: uuid }
+    AuthSession:
+      type: object
+      required: [id, user_id, tenant_id, user_agent, created_at, last_used_at, idle_expires_at, expires_at]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        user_agent: { type: string, maxLength: 512 }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+        idle_expires_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        is_current: { type: boolean }
+    AuthSessionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/AuthSession" }
+    AuthSessionCreated:
+      type: object
+      required: [session, user_id, tenant_id]
+      properties:
+        session: { $ref: "#/components/schemas/AuthSession" }
+        user_id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+    AuthStatus:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [logged_out, revoked] }
     SubmissionRequest:
       type: object
       additionalProperties: false
-      required: [from, to, text]
+      required: [from, text]
+      anyOf:
+        - required: [to]
+        - required: [cc]
+        - required: [bcc]
       properties:
         from: { type: string, format: email, maxLength: 320 }
         to:
           type: array
-          minItems: 1
+          maxItems: 100
+          items: { type: string, format: email, maxLength: 320 }
+        cc:
+          type: array
+          maxItems: 100
+          items: { type: string, format: email, maxLength: 320 }
+        bcc:
+          type: array
           maxItems: 100
           items: { type: string, format: email, maxLength: 320 }
         subject: { type: string, maxLength: 900 }
         text:
           type: string
-          description: Plain-text body. The generated RFC 5322 message, including headers, must not exceed 10 MiB.
+          description: Plain-text body. At most 100 unique addresses total across To, Cc, and Bcc. Bcc addresses are omitted from RFC 5322 headers.
     Submission:
       type: object
-      required: [id, from, to, subject, status, created_at]
+      required: [id, from, to, cc, bcc, subject, status, created_at]
       properties:
         id: { type: string, format: uuid }
         from: { type: string, format: email }
         to: { type: array, items: { type: string, format: email } }
+        cc: { type: array, items: { type: string, format: email } }
+        bcc: { type: array, items: { type: string, format: email } }
         subject: { type: string }
         status:
           type: string
-          enum: [queued, processing, retry_scheduled, simulated_succeeded, terminal_failed]
+          enum:
+            [
+              queued,
+              processing,
+              retry_scheduled,
+              simulated_succeeded,
+              terminal_failed,
+              accepted_by_remote,
+              partially_accepted,
+              permanently_failed,
+              delivery_uncertain,
+              delivery_processing,
+              cancelled,
+              suppressed,
+            ]
         created_at: { type: string, format: date-time }
+    SMTPCredential:
+      type: object
+      required: [id, username, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        expires_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+    SMTPCredentialSecret:
+      type: object
+      required: [id, username, authcid, password, expires_at, warning]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        authcid: { type: string, description: "<tenant UUID>:<username>" }
+        password:
+          { type: string, description: "Generated secret; shown only once" }
+        expires_at: { type: string, format: date-time }
+        warning: { type: string }
     SubmissionListResponse:
       type: object
       required: [items, next_page]
@@ -338,6 +1495,14 @@ components:
         items: { type: array, items: { type: object } }
         next_page: { nullable: true }
   securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-smtp_session
+      description: >
+        Production default. The cookie name is configurable; development uses
+        smtp_session by default. Unsafe requests also require X-CSRF-Token and
+        a matching Origin.
     bearerAuth:
       type: http
       scheme: bearer

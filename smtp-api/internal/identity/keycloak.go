@@ -62,6 +62,10 @@ func (v *KeycloakVerifier) Verify(ctx context.Context, rawToken string) (Claims,
 	if err != nil || token == nil {
 		return Claims{}, errors.New("invalid OIDC access token")
 	}
+	now := time.Now()
+	if token.IssuedAt.IsZero() || token.IssuedAt.After(now.Add(time.Minute)) {
+		return Claims{}, errors.New("invalid OIDC access token")
+	}
 	var keycloakClaims struct {
 		Type string `json:"typ"`
 	}

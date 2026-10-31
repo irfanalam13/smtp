@@ -10,8 +10,7 @@
 The current target is local development on an Ubuntu laptop; cloud hosting is
 not required. The dashboard, API, SMTP listener, and PostgreSQL port should
 remain bound to loopback. The development runner rejects a non-loopback API
-address. External SMTP delivery is disabled by default, and the queue worker
-uses the local deterministic processor.
+address. External SMTP delivery is disabled by default.
 
 Copy `.env.example` to `.env`, replace the local password, and start PostgreSQL:
 
@@ -39,10 +38,12 @@ For normal development starts after bootstrap, use:
 ```
 
 The normal runner starts PostgreSQL and launches the Go API, Next.js
-dashboard, SMTP ingress, and deterministic queue worker without rerunning
-migrations or installing dependencies. It stops application processes on
-`Ctrl-C` and leaves PostgreSQL running. Use `make dev-down` to stop it. Use
-`./scripts/run-dev.sh --no-worker` to omit the queue worker.
+dashboard, and SMTP ingress without rerunning migrations or installing
+dependencies. It stops application processes on
+`Ctrl-C` and leaves PostgreSQL running. Use `make dev-down` to stop it.
+Outbound delivery does not start by default; `--worker` starts the real SMTP
+delivery worker and requires `SMTP_DELIVERY_ENABLED=true` plus an explicit
+recipient-domain allowlist in `.env`.
 
 Open the dashboard at `http://127.0.0.1:3000`; the API is at
 `http://127.0.0.1:8080`, and local SMTP listens on `127.0.0.1:2525`. These
@@ -70,9 +71,9 @@ active tenant member and grant the narrowest needed scopes.
 
 Dashboard domain registration and TXT verification use PostgreSQL for durable
 accounts; the local development principal uses process-local state. Usage
-counters remain process-local. Message submissions are persisted to the queue,
-but the development worker simulates results and never performs external SMTP
-delivery. Durable submissions require a verified sender domain.
+counters remain process-local. Message submissions are persisted to the queue.
+The default development runner does not process outbound messages. Durable
+submissions require a verified sender domain.
 
 Before deploying, run the production-safe build and configuration checks:
 
@@ -99,10 +100,11 @@ cargo run -p smtp-ingress
 It binds only to `127.0.0.1:2525` by default and is not a production mail
 service. Its protocol tests run with `cargo test -p smtp-ingress`.
 
-Apply the queue migration with `make migrate-up`. Run the durable queue worker
-locally with `cargo run -p mail-queue`; it uses the deterministic test
-processor and never performs remote SMTP delivery. Queue integration tests are
-destructive and require an explicitly isolated database:
+Apply the queue migration with `make migrate-up`. To run external delivery,
+configure `SMTP_DELIVERY_ENABLED=true` and a comma-separated exact-domain
+`SMTP_DELIVERY_ALLOWLIST`, then use `cargo run -p mail-delivery` or
+`./scripts/run-dev.sh --worker`. Queue integration tests are destructive and
+require an explicitly isolated database:
 
 ```sh
 export TEST_DATABASE_URL='postgres://smtp_dev:local-password@localhost:5432/smtp_platform_test?sslmode=disable'

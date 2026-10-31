@@ -19,7 +19,11 @@ func (s *Store) CreateKey(p Principal, name string, scopes []string, expiry *tim
 		return APIKey{}, "", ErrInvalid
 	}
 	for _, scope := range scopes {
-		if scope != "domains:read" && scope != "domains:write" && scope != "delivery:read" && scope != "delivery:write" {
+		if scope != "domains:read" && scope != "domains:write" &&
+			scope != "delivery:read" && scope != "delivery:write" &&
+			scope != "smtp:credentials:read" && scope != "smtp:credentials:write" &&
+			scope != "mailbox:read" && scope != "mailbox:write" &&
+			scope != "mailbox:manage" {
 			return APIKey{}, "", ErrInvalid
 		}
 	}
