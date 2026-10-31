@@ -18,7 +18,7 @@ rustls = { version = "0.23.35", default-features = false, features = ["ring", "s
 rustls-pemfile = "2.2.0"
 tokio-rustls = "0.26.4"
 argon2 = "0.5.3"
-base64 = "0.22.1"
+base64 = "0.23.1"
 serde_json.workspace = true
 serde.workspace = true
 shared-types = { path = "../smtp-core" }
