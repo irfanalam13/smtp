@@ -76,6 +76,8 @@ func (h Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/submissions", h.submissions)
 	mux.HandleFunc("GET /v1/submissions/{id}/attempts", h.submissionAttempts)
 	mux.HandleFunc("GET /v1/delivery-events", h.deliveryEvents)
+	mux.HandleFunc("POST /v1/bounces", h.recordBounce)
+	mux.HandleFunc("POST /v1/complaints", h.recordComplaint)
 	mux.HandleFunc("GET /v1/webhooks", h.webhooks)
 	mux.HandleFunc("POST /v1/webhooks", h.createWebhook)
 	mux.HandleFunc("DELETE /v1/webhooks/{id}", h.deleteWebhook)

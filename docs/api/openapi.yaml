@@ -1354,6 +1354,49 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "503": { description: Delivery activity is temporarily unavailable }
+  /v1/bounces:
+    post:
+      summary: Record a hard bounce
+      description: Stores a durable bounce event and atomically activates recipient suppression.
+      tags: [Control plane]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recipient, status]
+              properties:
+                recipient: { type: string, format: email }
+                status: { type: string, pattern: "^5\\.[0-9]{1,3}\\.[0-9]{1,3}$" }
+                diagnostic: { type: string, maxLength: 1000 }
+      responses:
+        "202": { description: Bounce recorded and suppression activated }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { description: Control-plane storage is temporarily unavailable }
+  /v1/complaints:
+    post:
+      summary: Record a complaint
+      description: Stores a durable complaint event and atomically activates recipient suppression.
+      tags: [Control plane]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recipient]
+              properties:
+                recipient: { type: string, format: email }
+                diagnostic: { type: string, maxLength: 1000 }
+      responses:
+        "202": { description: Complaint recorded and suppression activated }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { description: Control-plane storage is temporarily unavailable }
   /v1/webhooks:
     get:
       summary: List webhook subscriptions
