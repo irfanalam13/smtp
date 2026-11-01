@@ -21,7 +21,7 @@ mail-auth = { version = "0.14.1", features = ["generate"] }
 base64.workspace = true
 chrono.workspace = true
 flate2.workspace = true
-quick-xml = { version = "0.41.0", features = ["serialize"] }
+quick-xml = { version = "0.42.0", features = ["serialize"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
