@@ -1253,6 +1253,68 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "503":
           { description: Queue activity storage is temporarily unavailable }
+  /v1/suppressions:
+    get:
+      summary: List active recipient suppressions
+      description: Returns active, tenant-scoped recipient suppressions enforced before outbound enqueue.
+      tags: [Control plane]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Active recipient suppressions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecipientSuppressionList"
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { description: Control-plane storage is temporarily unavailable }
+    post:
+      summary: Create or reactivate a recipient suppression
+      tags: [Control plane]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecipientSuppressionRequest"
+      responses:
+        "201":
+          description: Active recipient suppression
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecipientSuppression"
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { description: Control-plane storage is temporarily unavailable }
+  /v1/suppressions/{recipient}:
+    delete:
+      summary: Deactivate a recipient suppression
+      tags: [Control plane]
+      parameters:
+        - name: recipient
+          in: path
+          required: true
+          schema: { type: string, format: email, maxLength: 320 }
+      responses:
+        "200":
+          description: Suppression deactivated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [deactivated] }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { description: Control-plane storage is temporarily unavailable }
 components:
   parameters:
     Limit:
@@ -1388,6 +1450,30 @@ components:
       required: [status]
       properties:
         status: { type: string, enum: [logged_out, revoked] }
+    RecipientSuppressionRequest:
+      type: object
+      additionalProperties: false
+      required: [recipient, reason]
+      properties:
+        recipient: { type: string, format: email, maxLength: 320 }
+        reason: { type: string, enum: [hard_bounce, complaint, manual] }
+    RecipientSuppression:
+      type: object
+      required: [recipient, reason, active, created_at, updated_at]
+      properties:
+        recipient: { type: string, format: email }
+        reason: { type: string, enum: [hard_bounce, complaint, manual] }
+        source_event_id: { type: string, format: uuid, nullable: true }
+        active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    RecipientSuppressionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/RecipientSuppression" }
     SubmissionRequest:
       type: object
       additionalProperties: false
