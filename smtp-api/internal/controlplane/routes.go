@@ -75,6 +75,7 @@ func (h Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /v1/submissions", h.submit)
 	mux.HandleFunc("GET /v1/submissions", h.submissions)
 	mux.HandleFunc("GET /v1/submissions/{id}/attempts", h.submissionAttempts)
+	mux.HandleFunc("GET /v1/delivery-events", h.deliveryEvents)
 	mux.HandleFunc("GET /v1/suppressions", h.suppressions)
 	mux.HandleFunc("POST /v1/suppressions", h.createSuppression)
 	mux.HandleFunc("DELETE /v1/suppressions/{recipient}", h.deleteSuppression)

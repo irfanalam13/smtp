@@ -1291,6 +1291,24 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "503": { description: Control-plane storage is temporarily unavailable }
+  /v1/delivery-events:
+    get:
+      summary: List tenant-scoped recipient delivery events
+      description: Returns durable SMTP attempt outcomes. An accepted remote response is not a guarantee of inbox placement.
+      tags: [Control plane]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Recent recipient delivery events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryEventList"
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { description: Delivery activity is temporarily unavailable }
   /v1/suppressions/{recipient}:
     delete:
       summary: Deactivate a recipient suppression
@@ -1474,6 +1492,26 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/RecipientSuppression" }
+    DeliveryEvent:
+      type: object
+      required: [message_id, recipient, state, attempt_number, event_at]
+      properties:
+        message_id: { type: string, format: uuid }
+        recipient: { type: string, format: email }
+        state: { type: string }
+        attempt_number: { type: integer, minimum: 1 }
+        smtp_code: { type: integer, nullable: true }
+        diagnostic: { type: string, nullable: true }
+        remote_host: { type: string, nullable: true }
+        event_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+    DeliveryEventList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/DeliveryEvent" }
     SubmissionRequest:
       type: object
       additionalProperties: false
