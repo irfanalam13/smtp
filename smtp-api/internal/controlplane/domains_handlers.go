@@ -14,7 +14,7 @@ func (h Handler) checksRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.Store.Allow("dns:"+p.TenantID, 6, time.Minute) {
+	if !h.allow(r.Context(), "dns:"+p.TenantID, 6, time.Minute) {
 		w.Header().Set("Retry-After", "60")
 		Error(w, 429, "rate_limited", "DNS checks are temporarily rate limited")
 		return

@@ -27,6 +27,17 @@ are in the [M00 backend platform audit](backend-platform-audit.md). Historical
 phase completion records apply only to their documented scopes and do not
 imply end-to-end product readiness.
 
+The 2026-11-01 production-gap audit is in
+[smtp production gap audit](audits/smtp-production-gap-audit.md). This
+remediation branch also closes several P0 defects: production signup responses
+no longer disclose verification links, API throttling uses a shared
+PostgreSQL limiter when configured, development OAuth is explicitly gated, and
+inbound storage prepends a trusted `Received` trace while deduplicating on the
+pre-trace wire bytes. Account verification and recovery notifications now use
+an encrypted PostgreSQL outbox with retry leases and dead-letter state. These
+fixes do not change the overall `NOT READY`
+release decision.
+
 The complete phase-by-phase implementation register is in
 [phase implementation status](phase-status.md). It records remaining code,
 the reason each item is deferred, and the phase or prerequisite when it should
@@ -40,7 +51,9 @@ Phases 01–10 is in the [phase integration review](phase-integration.md).
 
 - Bounded SMTP ingress with optional STARTTLS/implicit TLS, TLS-gated
   PostgreSQL-backed AUTH PLAIN, shared database-backed throttling, automatic
-  certificate reload from mounted files, and graceful active-session draining.
+  certificate reload from mounted files, graceful active-session draining, and
+  explicit loopback-development, inbound-MTA, and authenticated submission
+  listener profiles with conventional port defaults.
   Tenant-scoped credential lifecycle endpoints return generated secrets once
   and audit changes in PostgreSQL.
 - PostgreSQL queue storage with idempotency, leases, retries, attempt history,
@@ -74,10 +87,10 @@ Phases 01–10 is in the [phase integration review](phase-integration.md).
   breakers, operational metrics/alerts, external SMTP interoperability testing,
   and production rollout controls.
 - Complete M07 tenant-managed DKIM controls and conformance evidence; complete
-  inbound operational recovery, mailbox retention, and object storage before
-  enabling a full hosted-mailbox product. The inbound event projection worker
-  is implemented; aggregate reporting and ingestion now have a bounded worker
-  pipeline.
+  mailbox retention and object storage before enabling a full hosted-mailbox
+  product. The inbound event projection worker now has bounded retries,
+  dead-letter state, and an explicit replay SQL tool; aggregate reporting and
+  ingestion now have a bounded worker pipeline.
   Public inbound mode requires ClamAV, SpamAssassin, DNS access, and shared
   PostgreSQL per-IP/per-domain rate limits.
 - Complete PostgreSQL-backed control-plane coverage; move development identity

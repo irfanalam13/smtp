@@ -31,6 +31,8 @@ type Handler struct {
 	AuthSessions      BrowserSessionConfig
 	SocialOAuth       SocialOAuthConfig
 	JWT               JWTConfig
+	RateLimitHMACKey  []byte
+	AuthEmailKey      []byte
 	DevMode           bool
 	TXT               TXTResolver
 	DNS               DNSResolver

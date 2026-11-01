@@ -49,6 +49,7 @@ file.
 | `SMTP_DKIM_REPORT_ORG_NAME`          | DMARC report worker   | None                        | Reporting organization name placed in aggregate report metadata                                                       |
 | `SMTP_DKIM_REPORT_CONTACT`           | DMARC report worker   | None                        | Contact mailbox placed in aggregate report metadata                                                                   |
 | `SMTP_BIND_ADDR`                     | No                    | `127.0.0.1:2525`            | SMTP ingress listener address; non-loopback submission requires authentication or an inbound recipient-policy adapter |
+| `SMTP_LISTENER_PROFILE`              | No                    | `loopback-development`      | Explicit role: `loopback-development`, `inbound-mta`, or authenticated `submission`; role combinations are validated at startup |
 | `SMTP_MAX_MESSAGE_BYTES`             | No                    | `10485760`                  | Global SMTP message-size ceiling advertised in EHLO and enforced during DATA; maximum 10 MiB                          |
 | `SMTP_INBOUND_ENABLED`               | No                    | `false`                     | Wires verified-local-recipient PostgreSQL acceptance into SMTP; requires `DATABASE_URL`                               |
 | `SMTP_INBOUND_MAX_MESSAGE_BYTES`     | No                    | `SMTP_MAX_MESSAGE_BYTES`    | Optional lower global ceiling for inbound messages; recipient tenant/domain limits can lower it further               |
@@ -64,6 +65,7 @@ file.
 | `SMTP_AUTH_ENABLED`                  | No                    | `false`                     | Enables PostgreSQL-backed SMTP AUTH PLAIN; requires `DATABASE_URL` and TLS certificate/key                            |
 | `SMTP_RATE_LIMIT_HMAC_KEY`           | SMTP AUTH             | None                        | Shared secret (at least 32 bytes) used to pseudonymize distributed PostgreSQL auth-throttle keys                      |
 | `SMTP_REQUIRE_AUTHENTICATION`        | No                    | Mirrors `SMTP_AUTH_ENABLED` | Requires authentication before accepting `MAIL FROM`; disabling it while AUTH is enabled is rejected                  |
+| `AUTH_EMAIL_ENCRYPTION_KEY`          | Account email delivery | None                     | At least 32 random bytes used to encrypt verification/reset notification bodies in the PostgreSQL outbox              |
 | `TEST_DATABASE_URL`                  | Queue tests           | None                        | Isolated disposable PostgreSQL database for ignored integration tests                                                 |
 
 ### Dashboard API proxy

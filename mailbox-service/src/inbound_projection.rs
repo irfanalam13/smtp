@@ -3,6 +3,8 @@ use std::time::Duration;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
+const MAX_PROJECTION_ATTEMPTS: i32 = 12;
+
 pub(crate) async fn run(pool: PgPool) {
     loop {
         match project_next(&pool).await {
@@ -30,7 +32,8 @@ pub(crate) async fn project_next_for_tenant(
          FROM mailbox_event_outbox
          WHERE event_type IN ('inbound.message.accepted', 'inbound.message.quarantined')
            AND ($1::UUID IS NULL OR tenant_id = $1)
-           AND published_at IS NULL AND available_at <= NOW()
+           AND published_at IS NULL AND dead_lettered_at IS NULL
+           AND available_at <= NOW()
            AND (locked_until IS NULL OR locked_until < NOW())
          ORDER BY available_at, created_at, id
          FOR UPDATE SKIP LOCKED
@@ -78,14 +81,39 @@ pub(crate) async fn project_next_for_tenant(
                          (LEAST(3600, power(2, LEAST(attempts, 11)))::INTEGER
                           * INTERVAL '1 second'),
                      locked_by = NULL, locked_until = NULL,
-                     last_error = LEFT($2, 1024)
+                     last_error = LEFT($2, 1024),
+                     dead_lettered_at = CASE
+                         WHEN attempts + 1 >= $3 THEN NOW()
+                         ELSE NULL
+                     END
                  WHERE id = $1 AND published_at IS NULL",
             )
             .bind(event_id)
             .bind(&error)
+            .bind(MAX_PROJECTION_ATTEMPTS)
             .execute(pool)
             .await
             .map_err(|retry_error| format!("{error}; retry scheduling failed: {retry_error}"))?;
+            match sqlx::query(
+                "SELECT 1 FROM mailbox_event_outbox
+                 WHERE id = $1 AND dead_lettered_at IS NOT NULL",
+            )
+            .bind(event_id)
+            .fetch_optional(pool)
+            .await
+            {
+                Err(error) => {
+                    tracing::warn!(%event_id, %error, "failed to verify inbound event dead-letter state");
+                }
+                Ok(Some(_)) => {
+                    tracing::error!(
+                        %event_id,
+                        attempts = MAX_PROJECTION_ATTEMPTS,
+                        "inbound mailbox projection event moved to dead letter after retry limit"
+                    );
+                }
+                Ok(None) => {}
+            }
             Err(error)
         }
     }

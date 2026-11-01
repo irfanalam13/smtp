@@ -13,6 +13,7 @@ use crate::{
     scanner::{ClamdScanner, ScanError, SpamAssassinScanner},
 };
 use async_trait::async_trait;
+use chrono::Utc;
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 use shared_types::{CANONICAL_MESSAGE_SCHEMA_VERSION, CanonicalMessage};
@@ -327,19 +328,15 @@ impl InboundAcceptor for PostgresInboundStore {
         context: &InboundContext,
     ) -> Result<InboundReceipt, InboundError> {
         let envelope = message.envelope();
-        let raw_message = message.raw_message();
+        let original_raw_message = message.raw_message();
         if message.schema_version() != CANONICAL_MESSAGE_SCHEMA_VERSION {
             return Err(InboundError::InvalidMessage);
         }
-        if raw_message.len() > self.max_message_bytes {
+        if original_raw_message.len() > self.max_message_bytes {
             return Err(InboundError::TooLarge);
         }
-        if context.received_by.is_empty()
-            || context.received_by.len() > 255
-            || !context
-                .received_by
-                .bytes()
-                .all(|byte| byte.is_ascii_graphic() && byte != b' ')
+        if !is_safe_received_atom(&context.received_by)
+            || !is_safe_received_atom(&context.helo_domain)
         {
             return Err(InboundError::InvalidMessage);
         }
@@ -347,7 +344,7 @@ impl InboundAcceptor for PostgresInboundStore {
             if let Some(authenticator) = &self.email_authenticator {
                 let (summary, disposition) = authenticator
                     .evaluate(
-                        raw_message,
+                        original_raw_message,
                         context.peer_ip,
                         &context.helo_domain,
                         &context.received_by,
@@ -367,7 +364,7 @@ impl InboundAcceptor for PostgresInboundStore {
             .filter(|result| !result.rua.is_empty())
         {
             let event_fingerprint =
-                dmarc_report_fingerprint(context.peer_ip, &envelope.sender, raw_message);
+                dmarc_report_fingerprint(context.peer_ip, &envelope.sender, original_raw_message);
             let envelope_from_domain = envelope
                 .sender
                 .rsplit_once('@')
@@ -426,7 +423,7 @@ impl InboundAcceptor for PostgresInboundStore {
             return Err(InboundError::AuthenticationRejected);
         }
         if let Some(scanner) = &self.scanner {
-            match scanner.scan(raw_message).await {
+            match scanner.scan(original_raw_message).await {
                 Ok(()) => {}
                 Err(ScanError::Infected) => return Err(InboundError::MalwareDetected),
                 Err(ScanError::Spam) => return Err(InboundError::InvalidMessage),
@@ -434,7 +431,7 @@ impl InboundAcceptor for PostgresInboundStore {
             }
         }
         if let Some(scanner) = &self.spam_scanner {
-            match scanner.scan(raw_message).await {
+            match scanner.scan(original_raw_message).await {
                 Ok(()) => {}
                 Err(ScanError::Spam) => return Err(InboundError::SpamDetected),
                 Err(ScanError::Unavailable) => return Err(InboundError::Temporary),
@@ -449,7 +446,15 @@ impl InboundAcceptor for PostgresInboundStore {
         if normalized.is_empty() || normalized.len() != envelope.recipients.len() {
             return Err(InboundError::InvalidRecipient);
         }
-        let idempotency_key = message_fingerprint(&envelope.sender, &normalized, raw_message);
+        // Deduplicate using the accepted wire representation before adding the
+        // current hop's trace field. A retry must not become a new message
+        // solely because its Received timestamp is different.
+        let idempotency_key =
+            message_fingerprint(&envelope.sender, &normalized, original_raw_message);
+        let raw_message = prepend_received_header(original_raw_message, context);
+        if raw_message.len() > self.max_message_bytes {
+            return Err(InboundError::TooLarge);
+        }
         let metadata = serde_json::to_value(message.indexed_metadata())
             .map_err(|_| InboundError::InvalidMessage)?;
         let mut transaction = self
@@ -610,7 +615,7 @@ impl InboundAcceptor for PostgresInboundStore {
             .bind(tenant_id)
             .bind(mailbox_id)
             .bind(&envelope.sender)
-            .bind(raw_message)
+            .bind(&raw_message)
             .bind(raw_message.len() as i64)
             .bind(subject.as_deref())
             .bind(
@@ -696,9 +701,51 @@ fn message_fingerprint(sender: &str, recipients: &[String], body: &[u8]) -> [u8;
         hasher.update((recipient.len() as u64).to_be_bytes());
         hasher.update(recipient.as_bytes());
     }
+
     hasher.update((body.len() as u64).to_be_bytes());
     hasher.update(body);
     hasher.finalize().into()
+}
+
+fn is_safe_received_atom(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 255
+        && value.bytes().all(|byte| {
+            byte.is_ascii_graphic()
+                && !matches!(
+                    byte,
+                    b'(' | b')'
+                        | b'<'
+                        | b'>'
+                        | b'\\'
+                        | b'@'
+                        | b','
+                        | b';'
+                        | b':'
+                        | b'"'
+                        | b'['
+                        | b']'
+                )
+        })
+}
+
+fn prepend_received_header(raw_message: &[u8], context: &InboundContext) -> Vec<u8> {
+    let timestamp = Utc::now().format("%a, %d %b %Y %H:%M:%S %z");
+    let transport = if context.received_over_tls {
+        "ESMTPS"
+    } else {
+        "ESMTP"
+    };
+    let mut traced = Vec::with_capacity(raw_message.len() + 192);
+    traced.extend_from_slice(
+        format!(
+            "Received: from {} ([{}]) by {} with {}; {}\r\n",
+            context.helo_domain, context.peer_ip, context.received_by, transport, timestamp
+        )
+        .as_bytes(),
+    );
+    traced.extend_from_slice(raw_message);
+    traced
 }
 
 fn dmarc_report_fingerprint(peer_ip: std::net::IpAddr, sender: &str, body: &[u8]) -> [u8; 32] {
@@ -768,5 +815,31 @@ mod tests {
             limiter.key_hash("ip", "192.0.2.1").unwrap(),
             limiter.key_hash("domain", "192.0.2.1").unwrap()
         );
+    }
+
+    #[test]
+    fn received_trace_is_trusted_and_preserves_existing_headers() {
+        let context = InboundContext {
+            peer_ip: "2001:db8::1".parse().unwrap(),
+            helo_domain: "mx.example.test".into(),
+            received_by: "inbound.example.test".into(),
+            received_over_tls: true,
+        };
+        let raw = b"Received: from prior.example.test\r\nSubject: test\r\n\r\nbody";
+        let traced = prepend_received_header(raw, &context);
+        let text = String::from_utf8(traced).unwrap();
+        assert!(text.starts_with(
+            "Received: from mx.example.test ([2001:db8::1]) by inbound.example.test with ESMTPS; "
+        ));
+        assert!(
+            text.ends_with("\r\nReceived: from prior.example.test\r\nSubject: test\r\n\r\nbody")
+        );
+    }
+
+    #[test]
+    fn received_trace_rejects_header_injection_atoms() {
+        assert!(!is_safe_received_atom("mx.example.test\r\nX-Injected: yes"));
+        assert!(!is_safe_received_atom("mx.example.test (untrusted)"));
+        assert!(is_safe_received_atom("mx.example.test"));
     }
 }

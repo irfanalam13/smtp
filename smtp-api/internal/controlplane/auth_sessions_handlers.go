@@ -48,7 +48,7 @@ func (h Handler) createAuthSession(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusForbidden, "forbidden", "request origin is not allowed")
 		return
 	}
-	if !h.Store.Allow("auth-session:"+requestClientIP(r), 10, time.Minute) {
+	if !h.allow(r.Context(), "auth-session:"+requestClientIP(r), 10, time.Minute) {
 		w.Header().Set("Retry-After", "60")
 		Error(w, http.StatusTooManyRequests, "rate_limited", "too many authentication attempts")
 		return
@@ -84,7 +84,7 @@ func (h Handler) createAuthSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.Store.Allow("auth-session-user:"+principal.UserID, 10, time.Minute) {
+	if !h.allow(r.Context(), "auth-session-user:"+principal.UserID, 10, time.Minute) {
 		w.Header().Set("Retry-After", "60")
 		Error(w, http.StatusTooManyRequests, "rate_limited", "too many authentication attempts")
 		return
@@ -146,8 +146,8 @@ func (h Handler) issueBrowserSession(
 func (h Handler) authProviders(w http.ResponseWriter, _ *http.Request) {
 	JSON(w, http.StatusOK, map[string]any{
 		"oidc_enabled":           h.AuthSessions.valid() && (h.OIDCLogin != nil || h.DevMode),
-		"google_enabled":         h.AuthSessions.valid() && (h.SocialOAuth.GoogleClientID != "" || h.DevMode || !h.AuthSessions.SecureCookies),
-		"github_enabled":         h.AuthSessions.valid() && (h.SocialOAuth.GitHubClientID != "" || h.DevMode || !h.AuthSessions.SecureCookies),
+		"google_enabled":         h.AuthSessions.valid() && (h.SocialOAuth.GoogleClientID != "" || h.DevMode),
+		"github_enabled":         h.AuthSessions.valid() && (h.SocialOAuth.GitHubClientID != "" || h.DevMode),
 		"password_login_enabled": h.AuthSessions.valid() && h.Postgres != nil,
 		"signup_enabled":         h.AuthSessions.valid() && h.Postgres != nil && h.AuthMailer != nil,
 		"password_reset_enabled": h.AuthSessions.valid() && h.Postgres != nil && h.AuthMailer != nil,
@@ -163,7 +163,7 @@ func (h Handler) startOIDCLogin(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusForbidden, "forbidden", "request origin is not allowed")
 		return
 	}
-	if !h.Store.Allow("oidc-start:"+requestClientIP(r), 20, time.Minute) {
+	if !h.allow(r.Context(), "oidc-start:"+requestClientIP(r), 20, time.Minute) {
 		w.Header().Set("Retry-After", "60")
 		Error(w, http.StatusTooManyRequests, "rate_limited", "too many authentication attempts")
 		return
@@ -239,7 +239,7 @@ func (h Handler) completeOIDCLogin(w http.ResponseWriter, r *http.Request) {
 		h.databaseError(w, "resolve OIDC identity", err)
 		return
 	}
-	if !h.Store.Allow("oidc-user:"+principal.UserID, 10, time.Minute) {
+	if !h.allow(r.Context(), "oidc-user:"+principal.UserID, 10, time.Minute) {
 		w.Header().Set("Retry-After", "60")
 		Error(w, http.StatusTooManyRequests, "rate_limited", "too many authentication attempts")
 		return
@@ -455,7 +455,7 @@ func (h Handler) sameOriginRequest(r *http.Request) bool {
 		return true
 	}
 	// In development environments, allow loopback origins (localhost or 127.0.0.1 on any port)
-	if h.DevMode || !h.AuthSessions.SecureCookies {
+	if h.DevMode {
 		parsedOrigin, err := url.Parse(origin)
 		if err == nil {
 			host := parsedOrigin.Hostname()

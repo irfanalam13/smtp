@@ -16,7 +16,8 @@ every mailbox belongs to the same tenant. The product policy does not permit
 cross-tenant fan-out.
 
 The acceptor commits one mailbox-scoped copy for each distinct mailbox, with
-routing metadata, exact raw RFC 5322 bytes, bounded size, a conservative
+routing metadata, the RFC 5321-required trusted `Received` trace followed by
+the accepted RFC 5322 bytes, bounded size, a conservative
 subject summary, and that mailbox's envelope recipients, in one PostgreSQL
 transaction. Fan-out is all-or-nothing. The SMTP session sends `250` only
 after that commit; any recipient, database, or uniqueness failure leaves no
@@ -24,9 +25,11 @@ partial copies. The `mailbox_id` and `tenant_id` composite foreign key remains
 the final database isolation guard.
 
 A versioned, length-framed SHA-256 fingerprint of sender, normalized
-recipients, and raw bytes provides duplicate retry detection. The stored
-sender, raw bytes, and mailbox recipient list are compared before a duplicate
-is accepted, so a digest match alone never merges different content. SMTP has
+recipients, and the accepted wire bytes provides duplicate retry detection.
+The fingerprint is computed before the current-hop trace is generated, while
+the stored message contains that trace. The stored sender, traced bytes, and
+mailbox recipient list are compared before a duplicate is accepted, so a
+digest match alone never merges different content. SMTP has
 no caller idempotency token in the supported profile; therefore byte-identical
 intentional resubmissions are indistinguishable from retries and may be
 deduplicated. This is at-most-once insertion for the fingerprinted envelope,
@@ -42,12 +45,20 @@ consumers. The Rust mailbox service consumes accepted and quarantined events,
 projects their raw content and parsed metadata into INBOX or Junk, allocates a
 folder UID, and acknowledges the event in the same transaction. A failed
 projection rolls back both the message and acknowledgment and schedules a
-bounded exponential retry. Logical quota is reserved by SMTP acceptance and is
-not charged again during projection.
+bounded exponential retry. After twelve failed attempts, the event is marked
+dead-lettered and excluded from automatic processing. Operators must inspect
+`last_error` and may explicitly replay one selected event with
+[`scripts/replay-inbound-event.sql`](../../scripts/replay-inbound-event.sql).
+Logical quota is reserved by SMTP acceptance and is not charged again during
+projection.
 
 Each durable copy stores the SMTP peer IP, receiving listener name, and TLS
-state with the envelope and raw message. These fields are connection metadata;
-the server does not prepend a `Received` header to the preserved raw message.
+state with the envelope and traced message. The receiving hostname, peer IP,
+transport, and timestamp in the prepended trace are generated only from
+validated server-side values. Existing `Received` fields remain below the new
+field and are never trusted as the current hop. The original accepted bytes
+are used for SPF/DKIM/DMARC and scanner evaluation so adding the trace does not
+break existing signatures.
 
 When configured, ClamAV scanning uses the bounded clamd `INSTREAM` protocol
 and SpamAssassin uses its bounded `CHECK SPAMC/1.5` protocol. Malware and spam
@@ -74,8 +85,9 @@ HTML sanitization, raw-message streaming, deletion jobs, and production object
 storage remain deferred. DMARC aggregate reports are stored without raw message
 content or envelope recipients, generated daily through the report worker, and
 ingested as normalized records by the bounded XML/gzip import command. The
-outbox has no inbound-specific consumer wired yet. M07 still needs tenant
-control-plane key management and RFC-indexed interoperability evidence.
+inbound projection consumer is wired in `mailbox-service/src/inbound_projection.rs`;
+lease recovery, replay/reconciliation tooling, tenant key management and
+RFC-indexed interoperability evidence remain M07 work.
 
 The ingress configuration exposes low-cardinality atomic counters for active
 connections, accepted/rejected/temporary outcomes, quota, malware and spam
