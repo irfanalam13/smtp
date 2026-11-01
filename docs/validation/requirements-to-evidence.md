@@ -25,6 +25,7 @@ the command includes a working-directory prefix.
 | Backup readability | PostgreSQL | `backup-postgres.sh`, `pg_restore --list` | Passed; expected tables present | PASS | Disposable DB |
 | Backup restoration | PostgreSQL | Restore into new database and schema query | Passed | PASS | Disposable DB |
 | Authentication/authorization | Control plane | Go security and control-plane tests | Passed | PASS | Existing Phase 07 tests |
+| OAuth/OIDC durable authorization flow | Control plane/PostgreSQL | `TestOAuthAuthorizationFlowIsProviderBoundAndSingleUseIntegration` | Not run: `TEST_DATABASE_URL` unavailable | NOT TESTED | Migration 000037 must be applied to an isolated database; test covers provider mismatch and replay. |
 | Tenant isolation | Control plane | Existing cross-tenant tests | Passed | PASS | Existing Phase 07 tests |
 | Secret scanning | Repository | Phase 05 Gitleaks workflow | Not run locally; tool/backend unavailable | BLOCKED | Must run in CI |
 | Rust dependency advisories | Rust lockfile | `cargo audit` | 2 vulnerabilities and 1 unmaintained warning | FAIL | See risk register |

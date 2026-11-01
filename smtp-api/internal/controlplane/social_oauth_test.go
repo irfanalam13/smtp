@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestSocialOAuthStartDevMode(t *testing.T) {
+func TestSocialOAuthStartFailsClosedWithoutDurableFlowStore(t *testing.T) {
 	config := BrowserSessionConfig{
 		Enabled:       true,
 		PublicOrigin:  "http://127.0.0.1:3000",
@@ -23,7 +23,9 @@ func TestSocialOAuthStartDevMode(t *testing.T) {
 		DevMode:      true,
 	}
 
-	// Test Google Start in Dev Mode
+	// A development UI must not create an OAuth transaction that cannot be
+	// consumed safely. The callback also needs PostgreSQL, so accepting the
+	// start request without it used to create a misleading fake sign-in path.
 	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:3000/v1/auth/oauth/google/start", nil)
 	req.Header.Set("Origin", "http://127.0.0.1:3000")
 	recorder := httptest.NewRecorder()
@@ -31,12 +33,11 @@ func TestSocialOAuthStartDevMode(t *testing.T) {
 	handler.startGoogleOAuth(recorder, req)
 
 	resp := recorder.Result()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected status 200 OK for dev google oauth start, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503 without durable flow store, got %d", resp.StatusCode)
 	}
-	body := recorder.Body.String()
-	if !strings.Contains(body, "Sign in with Google") {
-		t.Errorf("expected body to contain 'Sign in with Google', got %s", body)
+	if strings.Contains(recorder.Body.String(), "Sign in with Google") {
+		t.Fatal("Google development OAuth page was exposed without durable flow storage")
 	}
 
 	// Test GitHub Start in Dev Mode
@@ -47,12 +48,11 @@ func TestSocialOAuthStartDevMode(t *testing.T) {
 	handler.startGitHubOAuth(recorderGH, reqGH)
 
 	respGH := recorderGH.Result()
-	if respGH.StatusCode != http.StatusOK {
-		t.Fatalf("expected status 200 OK for dev github oauth start, got %d", respGH.StatusCode)
+	if respGH.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503 without durable flow store, got %d", respGH.StatusCode)
 	}
-	bodyGH := recorderGH.Body.String()
-	if !strings.Contains(bodyGH, "Sign in with GitHub") {
-		t.Errorf("expected body to contain 'Sign in with GitHub', got %s", bodyGH)
+	if strings.Contains(recorderGH.Body.String(), "Sign in with GitHub") {
+		t.Fatal("GitHub development OAuth page was exposed without durable flow storage")
 	}
 }
 

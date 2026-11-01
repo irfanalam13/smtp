@@ -66,3 +66,13 @@ It is **not** a production-ready hosted SMTP platform.
   and production-readiness limitations remain open.
 - POP3 is explicitly excluded from the first production release; the
   `smtp-pop3` crate is parser/state-machine fixture code only.
+
+## Validation update — 2026-11-01
+
+- Migration `000037` adds durable, provider-bound OAuth/OIDC authorization
+  flows with hashed state, nonce and PKCE verifier values, five-minute expiry,
+  and atomic one-time consumption. The Go unit, race, vet and build checks
+  passed after this change.
+- The associated isolated-PostgreSQL replay/provider-binding test was added
+  but not executed because `TEST_DATABASE_URL` is not configured. This remains
+  a release-readiness limitation; the platform is not production-ready.

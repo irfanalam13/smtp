@@ -24,6 +24,68 @@ type AuthSession struct {
 	Current       bool      `json:"is_current,omitempty"`
 }
 
+// CreateOAuthAuthorizationFlow persists the server-side half of an OAuth
+// authorization transaction. Browser cookies bind the transaction to the user
+// agent, but are not sufficient replay protection across a compromised or
+// restarted application instance.
+func (repository *PostgreSQLRepository) CreateOAuthAuthorizationFlow(
+	ctx context.Context,
+	provider string,
+	stateHash [sha256.Size]byte,
+	nonceHash [sha256.Size]byte,
+	verifierHash [sha256.Size]byte,
+	tenantID string,
+	expiresAt time.Time,
+) error {
+	if repository == nil || !validOAuthProvider(provider) || !expiresAt.After(time.Now()) ||
+		(tenantID != "" && !validUUID(tenantID)) {
+		return ErrUnauthorized
+	}
+	_, err := repository.pool.Exec(ctx, `
+		INSERT INTO oauth_authorization_flows
+			(provider, state_hash, nonce_hash, pkce_verifier_hash, tenant_id, expires_at)
+		VALUES ($1, $2, $3, $4, NULLIF($5, '')::uuid, $6)
+	`, provider, stateHash[:], nonceHash[:], verifierHash[:], tenantID, expiresAt.UTC())
+	if err != nil {
+		return fmt.Errorf("create oauth authorization flow: %w", err)
+	}
+	return nil
+}
+
+// ConsumeOAuthAuthorizationFlow atomically verifies and consumes a flow. A
+// consumed or expired state is indistinguishable from an unknown state to the
+// caller, preventing authorization-code replay and provider swapping.
+func (repository *PostgreSQLRepository) ConsumeOAuthAuthorizationFlow(
+	ctx context.Context,
+	provider string,
+	stateHash [sha256.Size]byte,
+	nonceHash [sha256.Size]byte,
+	verifierHash [sha256.Size]byte,
+) (string, error) {
+	if repository == nil || !validOAuthProvider(provider) {
+		return "", ErrUnauthorized
+	}
+	var tenantID string
+	err := repository.pool.QueryRow(ctx, `
+		UPDATE oauth_authorization_flows
+		SET consumed_at = NOW()
+		WHERE provider = $1 AND state_hash = $2 AND nonce_hash = $3
+		  AND pkce_verifier_hash = $4 AND consumed_at IS NULL AND expires_at > NOW()
+		RETURNING COALESCE(tenant_id::text, '')
+	`, provider, stateHash[:], nonceHash[:], verifierHash[:]).Scan(&tenantID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrUnauthorized
+	}
+	if err != nil {
+		return "", fmt.Errorf("consume oauth authorization flow: %w", err)
+	}
+	return tenantID, nil
+}
+
+func validOAuthProvider(provider string) bool {
+	return provider == "oidc" || provider == "google" || provider == "github"
+}
+
 func (repository *PostgreSQLRepository) CreateAuthSession(
 	ctx context.Context,
 	principal Principal,

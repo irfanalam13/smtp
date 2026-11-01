@@ -100,6 +100,11 @@ Phases 01–10 is in the [phase integration review](phase-integration.md).
   MFA/passkeys, GitHub OAuth identity lookup, distributed authentication
   rate limiting, and production provider operations remain. Generic OIDC login
   and revocable browser sessions still require pre-provisioned identities.
+OAuth/OIDC authorization starts now persist provider-bound, one-time,
+five-minute flow records in PostgreSQL (state, nonce, and PKCE values are
+hashed); callback cookies remain a browser binding, not the sole replay
+control. MFA/passkeys, refresh-token families, and production provider
+operations remain incomplete.
 - Connect the durable mailbox operations to a real authenticated IMAP service,
   or explicitly keep IMAP/POP3 out of product scope.
 - POP3 is explicitly out of scope for the first production release;

@@ -2,7 +2,6 @@ package controlplane
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -28,7 +27,7 @@ type SocialOAuthConfig struct {
 }
 
 func (h Handler) startGoogleOAuth(w http.ResponseWriter, r *http.Request) {
-	if !h.AuthSessions.valid() {
+	if !h.AuthSessions.valid() || h.Postgres == nil {
 		Error(w, http.StatusServiceUnavailable, "auth_unavailable", "authentication is not configured")
 		return
 	}
@@ -57,6 +56,10 @@ func (h Handler) startGoogleOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	verifier := smtpAuth.GeneratePKCEVerifier()
+	if err := h.createOAuthAuthorizationFlow(r, "google", state, nonce, verifier, tenantID); err != nil {
+		h.databaseError(w, "persist Google OAuth authorization flow", err)
+		return
+	}
 	h.setOIDCFlowCookies(w, state, nonce, verifier, tenantID)
 
 	redirectURI := h.SocialOAuth.GoogleRedirectURI
@@ -99,13 +102,14 @@ func (h Handler) completeGoogleOAuth(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusServiceUnavailable, "auth_unavailable", "authentication is not configured")
 		return
 	}
-	stateCookie, stateErr := r.Cookie(h.oidcCookieName("state"))
-	tenantCookie, _ := r.Cookie(h.oidcCookieName("tenant"))
-	queryState := r.URL.Query().Get("state")
 	queryCode := r.URL.Query().Get("code")
-
-	if stateErr != nil || queryState == "" || queryCode == "" ||
-		subtle.ConstantTimeCompare([]byte(queryState), []byte(stateCookie.Value)) != 1 {
+	if queryCode == "" {
+		h.clearOIDCFlowCookies(w)
+		h.redirectOIDCError(w, r, "oidc_failed")
+		return
+	}
+	tenantID, _, verifier, ok := h.consumeOAuthAuthorizationFlow(r, "google")
+	if !ok {
 		h.clearOIDCFlowCookies(w)
 		h.redirectOIDCError(w, r, "oidc_failed")
 		return
@@ -124,12 +128,7 @@ func (h Handler) completeGoogleOAuth(w http.ResponseWriter, r *http.Request) {
 		}
 		subject = "google:dev-" + email
 	} else if h.SocialOAuth.GoogleClientID != "" && h.SocialOAuth.GoogleClientSecret != "" {
-		verifierCookie, _ := r.Cookie(h.oidcCookieName("pkce"))
 		h.clearOIDCFlowCookies(w)
-		pkceVerifier := ""
-		if verifierCookie != nil {
-			pkceVerifier = verifierCookie.Value
-		}
 		redirectURI := h.SocialOAuth.GoogleRedirectURI
 		if redirectURI == "" {
 			redirectURI = h.AuthSessions.PublicOrigin + "/api/backend/v1/auth/oauth/google/callback"
@@ -146,11 +145,7 @@ func (h Handler) completeGoogleOAuth(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 
-		var opts []oauth2.AuthCodeOption
-		if pkceVerifier != "" {
-			opts = append(opts, oauth2.VerifierOption(pkceVerifier))
-		}
-		token, err := oauthConf.Exchange(ctx, queryCode, opts...)
+		token, err := oauthConf.Exchange(ctx, queryCode, oauth2.VerifierOption(verifier))
 		if err != nil {
 			slog.Error("google token exchange failed", "error", err)
 			h.redirectOIDCError(w, r, "oidc_failed")
@@ -193,7 +188,6 @@ func (h Handler) completeGoogleOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tenantID := cookieValue(tenantCookie)
 	principal, err := h.Postgres.AuthenticateOrProvisionOIDCSubject(
 		r.Context(), "https://accounts.google.com", subject, email, name, tenantID,
 	)
@@ -211,7 +205,7 @@ func (h Handler) completeGoogleOAuth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) startGitHubOAuth(w http.ResponseWriter, r *http.Request) {
-	if !h.AuthSessions.valid() {
+	if !h.AuthSessions.valid() || h.Postgres == nil {
 		Error(w, http.StatusServiceUnavailable, "auth_unavailable", "authentication is not configured")
 		return
 	}
@@ -240,6 +234,10 @@ func (h Handler) startGitHubOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	verifier := smtpAuth.GeneratePKCEVerifier()
+	if err := h.createOAuthAuthorizationFlow(r, "github", state, nonce, verifier, tenantID); err != nil {
+		h.databaseError(w, "persist GitHub OAuth authorization flow", err)
+		return
+	}
 	h.setOIDCFlowCookies(w, state, nonce, verifier, tenantID)
 
 	redirectURI := h.SocialOAuth.GitHubRedirectURI
@@ -277,14 +275,14 @@ func (h Handler) completeGitHubOAuth(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusServiceUnavailable, "auth_unavailable", "authentication is not configured")
 		return
 	}
-	stateCookie, stateErr := r.Cookie(h.oidcCookieName("state"))
-	tenantCookie, _ := r.Cookie(h.oidcCookieName("tenant"))
-	verifierCookie, verifierErr := r.Cookie(h.oidcCookieName("pkce"))
-	queryState := r.URL.Query().Get("state")
 	queryCode := r.URL.Query().Get("code")
-
-	if stateErr != nil || verifierErr != nil || queryState == "" || queryCode == "" ||
-		subtle.ConstantTimeCompare([]byte(queryState), []byte(stateCookie.Value)) != 1 {
+	if queryCode == "" {
+		h.clearOIDCFlowCookies(w)
+		h.redirectOIDCError(w, r, "oidc_failed")
+		return
+	}
+	tenantID, _, verifier, ok := h.consumeOAuthAuthorizationFlow(r, "github")
+	if !ok {
 		h.clearOIDCFlowCookies(w)
 		h.redirectOIDCError(w, r, "oidc_failed")
 		return
@@ -320,7 +318,7 @@ func (h Handler) completeGitHubOAuth(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 
-		token, err := oauthConf.Exchange(ctx, queryCode, oauth2.VerifierOption(verifierCookie.Value))
+		token, err := oauthConf.Exchange(ctx, queryCode, oauth2.VerifierOption(verifier))
 		if err != nil {
 			slog.Error("github token exchange failed", "error", err)
 			h.redirectOIDCError(w, r, "oidc_failed")
@@ -344,6 +342,10 @@ func (h Handler) completeGitHubOAuth(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := json.NewDecoder(userResp.Body).Decode(&ghUser); err != nil {
 			slog.Error("github user decode failed", "error", err)
+			h.redirectOIDCError(w, r, "oidc_failed")
+			return
+		}
+		if ghUser.ID <= 0 {
 			h.redirectOIDCError(w, r, "oidc_failed")
 			return
 		}
@@ -376,7 +378,6 @@ func (h Handler) completeGitHubOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tenantID := cookieValue(tenantCookie)
 	principal, err := h.Postgres.AuthenticateOrProvisionOIDCSubject(
 		r.Context(), "https://github.com", subject, email, name, tenantID,
 	)

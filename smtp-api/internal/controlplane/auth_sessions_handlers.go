@@ -155,7 +155,7 @@ func (h Handler) authProviders(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h Handler) startOIDCLogin(w http.ResponseWriter, r *http.Request) {
-	if !h.AuthSessions.valid() || h.OIDCLogin == nil {
+	if !h.AuthSessions.valid() || h.OIDCLogin == nil || h.Postgres == nil {
 		Error(w, http.StatusServiceUnavailable, "auth_unavailable", "OIDC login is not configured")
 		return
 	}
@@ -188,6 +188,10 @@ func (h Handler) startOIDCLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	verifier := smtpAuth.GeneratePKCEVerifier()
+	if err := h.createOAuthAuthorizationFlow(r, "oidc", state, nonce, verifier, tenantID); err != nil {
+		h.databaseError(w, "persist OIDC authorization flow", err)
+		return
+	}
 	destination, err := h.OIDCLogin.AuthorizationURL(state, nonce, verifier)
 	if err != nil {
 		h.databaseError(w, "build OIDC authorization request", err)
@@ -202,28 +206,26 @@ func (h Handler) completeOIDCLogin(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusServiceUnavailable, "auth_unavailable", "OIDC login is not configured")
 		return
 	}
-	stateCookie, stateErr := r.Cookie(h.oidcCookieName("state"))
-	nonceCookie, nonceErr := r.Cookie(h.oidcCookieName("nonce"))
-	verifierCookie, verifierErr := r.Cookie(h.oidcCookieName("pkce"))
-	tenantCookie, _ := r.Cookie(h.oidcCookieName("tenant"))
-	queryState := r.URL.Query().Get("state")
 	queryCode := r.URL.Query().Get("code")
-	if stateErr != nil || nonceErr != nil || verifierErr != nil ||
-		queryState == "" || queryCode == "" ||
-		subtle.ConstantTimeCompare([]byte(queryState), []byte(stateCookie.Value)) != 1 {
+	if queryCode == "" {
+		h.clearOIDCFlowCookies(w)
+		h.redirectOIDCError(w, r, "oidc_failed")
+		return
+	}
+	tenantID, nonce, verifier, ok := h.consumeOAuthAuthorizationFlow(r, "oidc")
+	if !ok {
 		h.clearOIDCFlowCookies(w)
 		h.redirectOIDCError(w, r, "oidc_failed")
 		return
 	}
 	h.clearOIDCFlowCookies(w)
 	identity, err := h.OIDCLogin.AuthenticateCode(
-		r.Context(), queryCode, verifierCookie.Value, nonceCookie.Value,
+		r.Context(), queryCode, verifier, nonce,
 	)
 	if err != nil {
 		h.redirectOIDCError(w, r, "oidc_failed")
 		return
 	}
-	tenantID := cookieValue(tenantCookie)
 	principal, err := h.Postgres.AuthenticateOrProvisionOIDCSubject(
 		r.Context(), identity.Issuer, identity.Subject, "", "", tenantID,
 	)
@@ -253,6 +255,39 @@ func (h Handler) completeOIDCLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, h.AuthSessions.PublicOrigin, http.StatusSeeOther)
+}
+
+func (h Handler) createOAuthAuthorizationFlow(r *http.Request, provider, state, nonce, verifier, tenantID string) error {
+	if h.Postgres == nil {
+		return ErrUnauthorized
+	}
+	return h.Postgres.CreateOAuthAuthorizationFlow(
+		r.Context(), provider, smtpAuth.HashSecret(state), smtpAuth.HashSecret(nonce),
+		smtpAuth.HashSecret(verifier), tenantID, time.Now().Add(5*time.Minute),
+	)
+}
+
+// consumeOAuthAuthorizationFlow checks browser binding first and then performs
+// the single-use database transition. It intentionally returns only a boolean
+// so callback failures do not disclose whether a state was expired, replayed,
+// or issued for another provider.
+func (h Handler) consumeOAuthAuthorizationFlow(r *http.Request, provider string) (string, string, string, bool) {
+	stateCookie, stateErr := r.Cookie(h.oidcCookieName("state"))
+	nonceCookie, nonceErr := r.Cookie(h.oidcCookieName("nonce"))
+	verifierCookie, verifierErr := r.Cookie(h.oidcCookieName("pkce"))
+	queryState := r.URL.Query().Get("state")
+	if stateErr != nil || nonceErr != nil || verifierErr != nil || queryState == "" ||
+		subtle.ConstantTimeCompare([]byte(queryState), []byte(stateCookie.Value)) != 1 {
+		return "", "", "", false
+	}
+	tenantID, err := h.Postgres.ConsumeOAuthAuthorizationFlow(
+		r.Context(), provider, smtpAuth.HashSecret(queryState), smtpAuth.HashSecret(nonceCookie.Value),
+		smtpAuth.HashSecret(verifierCookie.Value),
+	)
+	if err != nil {
+		return "", "", "", false
+	}
+	return tenantID, nonceCookie.Value, verifierCookie.Value, true
 }
 
 func (h Handler) setOIDCFlowCookies(

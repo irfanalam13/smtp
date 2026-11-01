@@ -24,6 +24,22 @@ The repository is intentionally a development and validation foundation. A
 feature must not be described as production-ready merely because its
 architecture, interface, prototype, or documentation exists.
 
+## Identity authorization-flow hardening
+
+**Status:** Partially implemented and tested at the control-plane unit level;
+disposable-PostgreSQL replay/expiry evidence remains required.
+
+Migration `000037_create_oauth_authorization_flows` makes generic OIDC,
+Google, and GitHub browser authorization attempts durable. It stores only
+SHA-256 hashes of state, nonce, and PKCE verifier, binds the record to its
+provider and optional tenant selection, expires it after five minutes, and
+uses one atomic `UPDATE ... RETURNING` transition at callback time. A missing,
+expired, replayed, or cross-provider flow produces the same generic failure.
+The application refuses to begin these flows when PostgreSQL is unavailable.
+Cookies still bind the browser transaction, but no longer provide the only
+replay defence. This does not implement MFA, WebAuthn, refresh-token families,
+or external-provider operational validation.
+
 ## Backend platform milestone M02 — SMTP protocol conformance and ESMTP profile
 
 **Status:** Complete for the selected bounded SMTP/ESMTP profile.
