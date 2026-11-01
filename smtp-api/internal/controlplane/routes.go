@@ -101,6 +101,7 @@ func (h Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/mailboxes/{mailbox_id}/messages/{message_id}/content", h.mailboxServiceRead)
 	mux.HandleFunc("GET /v1/mailboxes/{mailbox_id}/messages/{message_id}/headers", h.mailboxServiceRead)
 	mux.HandleFunc("GET /v1/mailboxes/{mailbox_id}/messages/{message_id}/body", h.mailboxServiceRead)
+	mux.HandleFunc("GET /v1/mailboxes/{mailbox_id}/export", h.mailboxServiceRead)
 	mux.HandleFunc("POST /v1/mailboxes/{mailbox_id}/messages", h.mailboxServiceWrite)
 	mux.HandleFunc("POST /v1/mailboxes/{mailbox_id}/messages/{message_id}/copy", h.mailboxServiceWrite)
 	mux.HandleFunc("POST /v1/mailboxes/{mailbox_id}/messages/{message_id}/move", h.mailboxServiceWrite)

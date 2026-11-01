@@ -943,6 +943,28 @@ paths:
         "200": { description: Stored RFC 5322 body bytes }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/mailboxes/{mailbox_id}/export:
+    get:
+      summary: Export a mailbox metadata manifest
+      description: Requires mailbox:read. Returns bounded message metadata and durable deletion tombstones; raw message bytes remain available through authorized message content endpoints.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Mailbox export manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mailbox_id, generated_at, truncated, messages, tombstones]
+                properties:
+                  mailbox_id: { type: string, format: uuid }
+                  generated_at: { type: string, format: date-time }
+                  truncated: { type: boolean }
+                  messages: { type: array, items: { type: object } }
+                  tombstones: { type: array, items: { type: object } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/mailboxes/{mailbox_id}/messages/{message_id}/flags:
     patch:
       summary: Replace system flags

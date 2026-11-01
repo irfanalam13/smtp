@@ -125,6 +125,16 @@ pub(super) async fn dispatch(
                 list_aliases(state, principal, mailbox_id).await
             }
         }
+        ("GET", path) if path.ends_with("/export") => {
+            let Some(mailbox_id) = mailbox_id(path, "/export") else {
+                return Some(not_found());
+            };
+            if !has_scope(principal, "mailbox:read") {
+                forbidden()
+            } else {
+                export_mailbox(state, principal, mailbox_id).await
+            }
+        }
         ("GET", path) if path.ends_with("/permissions") => {
             let Some(mailbox_id) = mailbox_id(path, "/permissions") else {
                 return Some(not_found());
@@ -1268,6 +1278,93 @@ async fn revoke_permission(
         return database_error(error, "commit permission revocation");
     }
     StatusCode::NO_CONTENT.into_response()
+}
+
+async fn export_mailbox(
+    state: &AppState,
+    principal: &InternalPrincipal,
+    mailbox_id: Uuid,
+) -> Response {
+    let mut transaction = match state.pool.begin().await {
+        Ok(transaction) => transaction,
+        Err(error) => return database_error(error, "begin mailbox export"),
+    };
+    match authorize(&mut transaction, principal, mailbox_id, "read").await {
+        Ok(true) => {}
+        Ok(false) => return not_found(),
+        Err(error) => return database_error(error, "authorize mailbox export"),
+    }
+
+    let messages = match sqlx::query(
+        "SELECT message.id, message.folder_id, message.uid, message.raw_size,
+                message.internal_date, message.deleted_at, message.flags,
+                message.sender_address, message.subject
+         FROM mailbox_messages AS message
+         JOIN mailbox_folders AS folder ON folder.id = message.folder_id
+         WHERE folder.mailbox_id = $1
+         ORDER BY message.internal_date, message.uid
+         LIMIT 10000",
+    )
+    .bind(mailbox_id)
+    .fetch_all(&mut *transaction)
+    .await
+    {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| {
+                json!({
+                    "id": row.get::<Uuid, _>("id"),
+                    "folder_id": row.get::<Uuid, _>("folder_id"),
+                    "uid": row.get::<i64, _>("uid"),
+                    "raw_size": row.get::<i64, _>("raw_size"),
+                    "internal_date": row.get::<chrono::DateTime<chrono::Utc>, _>("internal_date"),
+                    "deleted_at": row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("deleted_at"),
+                    "flags": row.get::<Vec<String>, _>("flags"),
+                    "sender": row.get::<Option<String>, _>("sender_address"),
+                    "subject": row.get::<Option<String>, _>("subject")
+                })
+            })
+            .collect::<Vec<_>>(),
+        Err(error) => return database_error(error, "read mailbox export"),
+    };
+    let tombstones = match sqlx::query(
+        "SELECT message_id, folder_id, uid, deleted_at, deletion_reason
+         FROM mailbox_message_tombstones
+         WHERE mailbox_id = $1
+         ORDER BY deleted_at, message_id
+         LIMIT 10000",
+    )
+    .bind(mailbox_id)
+    .fetch_all(&mut *transaction)
+    .await
+    {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| {
+                json!({
+                    "message_id": row.get::<Uuid, _>("message_id"),
+                    "folder_id": row.get::<Option<Uuid>, _>("folder_id"),
+                    "uid": row.get::<Option<i64>, _>("uid"),
+                    "deleted_at": row.get::<chrono::DateTime<chrono::Utc>, _>("deleted_at"),
+                    "reason": row.get::<String, _>("deletion_reason")
+                })
+            })
+            .collect::<Vec<_>>(),
+        Err(error) => return database_error(error, "read mailbox tombstones"),
+    };
+    if let Err(error) = transaction.commit().await {
+        return database_error(error, "commit mailbox export");
+    }
+    json_response(
+        StatusCode::OK,
+        json!({
+            "mailbox_id": mailbox_id,
+            "generated_at": chrono::Utc::now(),
+            "truncated": messages.len() == 10000 || tombstones.len() == 10000,
+            "messages": messages,
+            "tombstones": tombstones
+        }),
+    )
 }
 
 async fn append_message(
