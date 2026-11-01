@@ -158,6 +158,7 @@ func run() error {
 	if authMailer != nil {
 		go repository.RunAuthEmailOutbox(shutdownCtx, authMailer, authEmailKey)
 	}
+	go repository.RunWebhookDelivery(shutdownCtx)
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()

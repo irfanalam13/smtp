@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -58,6 +59,27 @@ func (repository *PostgreSQLRepository) RecordFeedback(
 	}
 	if err := insertAuthAudit(ctx, tx, principal, "feedback."+eventType+".recorded", recipient); err != nil {
 		return err
+	}
+	payload, err := json.Marshal(map[string]string{
+		"id":         id,
+		"type":       eventType,
+		"recipient":  recipient,
+		"status":     status,
+		"diagnostic": diagnostic,
+	})
+	if err != nil {
+		return errors.New("marshal feedback webhook: " + err.Error())
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO webhook_deliveries
+			(id, subscription_id, tenant_id, event_id, event_type, payload)
+		SELECT gen_random_uuid(), subscription.id, subscription.tenant_id, $2, $3, $4
+		FROM webhook_subscriptions AS subscription
+		WHERE subscription.tenant_id = $1 AND subscription.active = TRUE
+		  AND $3 = ANY(subscription.event_types)
+		ON CONFLICT (subscription_id, event_id) DO NOTHING
+	`, principal.TenantID, id, eventType, payload); err != nil {
+		return errors.New("enqueue feedback webhooks: " + err.Error())
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return errors.New("commit feedback event: " + err.Error())
