@@ -203,12 +203,18 @@ func (repository *PostgreSQLRepository) AuthenticateOrProvisionOIDCSubject(
 	name string,
 	tenantID string,
 ) (Principal, error) {
+	if tenantID != "" && !validUUID(tenantID) {
+		return Principal{}, ErrUnauthorized
+	}
 	principal, err := repository.AuthenticateOIDCSubject(ctx, issuer, subject, tenantID)
 	if err == nil {
 		return principal, nil
 	}
 	if !errors.Is(err, ErrUnauthorized) {
 		return Principal{}, err
+	}
+	if tenantID != "" {
+		return Principal{}, ErrUnauthorized
 	}
 
 	orgName := strings.TrimSpace(name)
