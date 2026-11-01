@@ -102,6 +102,10 @@ The current implementation status and deferred work are tracked in
 [current status](docs/project-status.md). The repository is a development and
 validation foundation, not yet a production-ready hosted SMTP service.
 
+POP3 is explicitly out of scope for the first production release. The
+`smtp-pop3` crate contains parser/state-machine fixtures only and is not a
+network service or authenticated mailbox implementation.
+
 Phase 10 validation evidence is available in the
 [validation reports](docs/validation/README.md), including the requirements
 matrix, recovery evidence, performance baseline, risk register, and

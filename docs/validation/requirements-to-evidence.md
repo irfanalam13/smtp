@@ -28,6 +28,8 @@ the command includes a working-directory prefix.
 | Tenant isolation | Control plane | Existing cross-tenant tests | Passed | PASS | Existing Phase 07 tests |
 | Secret scanning | Repository | Phase 05 Gitleaks workflow | Not run locally; tool/backend unavailable | BLOCKED | Must run in CI |
 | Rust dependency advisories | Rust lockfile | `cargo audit` | 2 vulnerabilities and 1 unmaintained warning | FAIL | See risk register |
+| Fixed XML parser advisories | Rust lockfile | `cargo audit` after `quick-xml` 0.41.0 upgrade | quick-xml advisories cleared | PASS | `Cargo.toml`, `Cargo.lock` |
+| POP3 release scope | Protocol scope | Review crate, README, and release docs | Explicitly out of scope; no listener or mailbox service | PASS with limitation | `smtp-pop3/README.md` |
 | Production OIDC | Control plane | No provider configured | Not implemented | NOT TESTED | Production prerequisite |
 | Durable control-plane repositories | Go/PostgreSQL | Current store is in-memory | Not implemented | NOT TESTED | Phase 06/08 handoff |
 | Distributed tracing | Cross-service | No collector or second deployed service | Not implemented | BLOCKED | Phase 09/10 deployment prerequisite |

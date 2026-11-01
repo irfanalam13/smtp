@@ -4,10 +4,11 @@ use std::{
 };
 
 use async_trait::async_trait;
-use trust_dns_resolver::{
-    TokioAsyncResolver,
-    config::{ResolverConfig, ResolverOpts},
-    error::ResolveErrorKind,
+use hickory_resolver::{
+    TokioResolver,
+    config::ResolverConfig,
+    net::{DnsError, NetError, runtime::TokioRuntimeProvider},
+    proto::rr::RData,
 };
 
 use crate::outcome::DeliveryError;
@@ -87,19 +88,26 @@ pub trait Resolver: Send + Sync {
 
 #[derive(Clone)]
 pub struct DnsResolver {
-    resolver: TokioAsyncResolver,
+    resolver: TokioResolver,
 }
 
 impl DnsResolver {
     pub fn new() -> Self {
         Self {
-            resolver: TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default()),
+            resolver: TokioResolver::builder_with_config(
+                ResolverConfig::default(),
+                TokioRuntimeProvider::default(),
+            )
+            .build()
+            .expect("default DNS resolver configuration is valid"),
         }
     }
 
     pub fn try_from_system_conf() -> Result<Self, DeliveryError> {
-        let resolver =
-            TokioAsyncResolver::tokio_from_system_conf().map_err(|_| DeliveryError::Dns)?;
+        let resolver = TokioResolver::builder_tokio()
+            .map_err(|_| DeliveryError::Dns)?
+            .build()
+            .map_err(|_| DeliveryError::Dns)?;
         Ok(Self { resolver })
     }
 
@@ -160,20 +168,23 @@ impl Resolver for DnsResolver {
             .map_err(|_| DeliveryError::Dns)?;
         let lookup = match lookup {
             Ok(lookup) => lookup,
-            Err(error) if matches!(error.kind(), ResolveErrorKind::NoRecordsFound { .. }) => {
+            Err(NetError::Dns(DnsError::NoRecordsFound(_))) => {
                 return self.resolve_implicit_mx(domain, timeout_duration).await;
             }
             Err(_) => return Err(DeliveryError::Dns),
         };
         let mut records = Vec::new();
-        for record in lookup.iter() {
-            let exchange = record.exchange().to_utf8();
+        for record in lookup.answers() {
+            let RData::MX(mx) = &record.data else {
+                continue;
+            };
+            let exchange = mx.exchange.to_utf8();
             if exchange == "." {
                 return Err(DeliveryError::NullMx);
             }
             let host = exchange.trim_end_matches('.').to_ascii_lowercase();
             if valid_dns_name(&host) {
-                records.push((record.preference(), host));
+                records.push((mx.preference, host));
             }
         }
         if records.is_empty() {

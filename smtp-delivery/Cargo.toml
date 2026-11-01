@@ -13,7 +13,7 @@ rustls = { version = "0.23.35", default-features = false, features = ["ring", "s
 thiserror = "2.0.17"
 tokio = { version = "1.54.1", features = ["io-util", "net", "time", "macros", "rt-multi-thread", "sync", "signal", "fs"] }
 tokio-rustls = "0.26.4"
-trust-dns-resolver = { version = "0.23.2", default-features = false, features = ["tokio-runtime", "system-config"] }
+hickory-resolver = { version = "0.26.3", default-features = false, features = ["tokio", "system-config"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "json"] }
 webpki-roots = "1.0.4"
@@ -21,7 +21,7 @@ mail-auth = { version = "0.14.1", features = ["generate"] }
 base64.workspace = true
 chrono.workspace = true
 flate2.workspace = true
-quick-xml = { version = "0.38.3", features = ["serialize"] }
+quick-xml = { version = "0.41.0", features = ["serialize"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

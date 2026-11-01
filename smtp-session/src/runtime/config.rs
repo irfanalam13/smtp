@@ -10,7 +10,10 @@ use crate::auth::{AuthRateLimiter, Authenticator, PostgresAuthRateLimiter, Sende
 use crate::inbound::InboundAcceptor;
 use crate::metrics::InboundMetrics;
 use mail_queue::Queue;
-use rustls::{ServerConfig, pki_types::CertificateDer};
+use rustls::{
+    ServerConfig,
+    pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
+};
 use sha2::{Digest, Sha256};
 use shared_types::MAX_CANONICAL_MESSAGE_BYTES;
 
@@ -286,7 +289,7 @@ fn build_tls_config(
     certificate_bytes: &[u8],
     private_key_bytes: &[u8],
 ) -> io::Result<Arc<ServerConfig>> {
-    let certificates = rustls_pemfile::certs(&mut &certificate_bytes[..])
+    let certificates = CertificateDer::pem_slice_iter(certificate_bytes)
         .collect::<Result<Vec<CertificateDer<'static>>, _>>()
         .map_err(io::Error::other)?;
     if certificates.is_empty() {
@@ -295,9 +298,7 @@ fn build_tls_config(
             "certificate chain is empty",
         ));
     }
-    let private_key = rustls_pemfile::private_key(&mut &private_key_bytes[..])
-        .map_err(io::Error::other)?
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "private key is missing"))?;
+    let private_key = PrivateKeyDer::from_pem_slice(private_key_bytes).map_err(io::Error::other)?;
     let config = ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certificates, private_key)

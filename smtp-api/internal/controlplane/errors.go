@@ -11,4 +11,5 @@ var (
 	ErrInvalid                 = errors.New("invalid request")
 	ErrVerificationPending     = errors.New("verification pending")
 	ErrRateLimited             = errors.New("rate limited")
+	ErrSuppressed              = errors.New("recipient suppressed")
 )

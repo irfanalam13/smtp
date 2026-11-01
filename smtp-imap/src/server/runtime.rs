@@ -229,7 +229,7 @@ pub(super) fn load_tls_config(
 ) -> io::Result<ServerConfig> {
     let certificate_bytes = std::fs::read(certificate_path)?;
     let private_key_bytes = std::fs::read(private_key_path)?;
-    let certificates = rustls_pemfile::certs(&mut Cursor::new(certificate_bytes))
+    let certificates = CertificateDer::pem_slice_iter(&certificate_bytes)
         .collect::<Result<Vec<CertificateDer<'static>>, _>>()
         .map_err(io::Error::other)?;
     if certificates.is_empty() {
@@ -238,9 +238,8 @@ pub(super) fn load_tls_config(
             "TLS certificate chain is empty",
         ));
     }
-    let key = rustls_pemfile::private_key(&mut Cursor::new(private_key_bytes))
-        .map_err(io::Error::other)?
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "TLS private key is missing"))?;
+    let key = rustls::pki_types::PrivateKeyDer::from_pem_slice(&private_key_bytes)
+        .map_err(io::Error::other)?;
     ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
         .with_safe_default_protocol_versions()
         .map_err(io::Error::other)?

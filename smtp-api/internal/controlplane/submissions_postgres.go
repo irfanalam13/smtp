@@ -98,6 +98,22 @@ func (repository *PostgreSQLRepository) enqueueSubmission(
 			return Submission{}, false, err
 		}
 	}
+	recipients := append(append(append([]string{}, submission.To...), submission.Cc...), submission.Bcc...)
+	for _, recipient := range recipients {
+		var suppressed bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM recipient_suppressions
+				WHERE tenant_id = $1 AND lower(recipient) = lower($2) AND active = TRUE
+			)
+		`, principal.TenantID, recipient).Scan(&suppressed); err != nil {
+			return Submission{}, false, fmt.Errorf("check recipient suppression: %w", err)
+		}
+		if suppressed {
+			return Submission{}, false, ErrSuppressed
+		}
+	}
 	senderDomain := strings.ToLower(submission.From[strings.LastIndexByte(submission.From, '@')+1:])
 	dkimKeyRef := "secret-manager://dkim/" + senderDomain
 

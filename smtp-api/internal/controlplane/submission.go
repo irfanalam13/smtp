@@ -428,6 +428,9 @@ func (h Handler) submit(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, ErrInvalid):
 		Error(w, http.StatusBadRequest, "invalid_submission", "submission exceeds queue limits or contains invalid data")
 		return
+	case errors.Is(err, ErrSuppressed):
+		Error(w, http.StatusUnprocessableEntity, "recipient_suppressed", "one or more recipients are suppressed for this tenant")
+		return
 	case err != nil:
 		logSubmissionError(w, "message submission failed", err)
 		Error(w, http.StatusServiceUnavailable, "submission_unavailable", "message could not be added to the queue")

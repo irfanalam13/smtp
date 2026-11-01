@@ -338,8 +338,10 @@ production readiness.
 
 Research and storage contracts are documented under [`standards/`](standards/).
 Phase 21/25 now has a durable folder/message schema and shared bounded mailbox
-model. IMAP and POP3 listeners and command implementations remain pending and
-must be built on this storage contract rather than independent in-memory state.
+model. IMAP remains pending and must be built on this storage contract rather
+than independent in-memory state. POP3 is explicitly out of scope for the
+first production release; `smtp-pop3` contains parser/state-machine fixtures
+only and has no listener or mailbox implementation.
 
 ## Phases 26–30 — Search, conversations, attachments, and synchronization
 

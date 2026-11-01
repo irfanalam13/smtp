@@ -27,8 +27,11 @@ It is **not** a production-ready hosted SMTP platform.
 
 ## Limitations
 
-- `cargo audit` fails on two vulnerability findings and reports one
-  unmaintained dependency.
+- `cargo audit` now reports only the RSA/Marvin timing finding. The quick-xml,
+  idna, trust-dns, and rustls-pemfile findings were cleared by upgrading or
+  replacing those dependencies. RSA remains transitively required by
+  `mail-auth`, has no fixed upgrade, and is used only for standards-based
+  signature verification in the current platform.
 - The control plane remains in memory.
 - Production OIDC and secret-management integrations are absent.
 - Distributed tracing, centralized logs, and distributed metrics storage are
@@ -61,3 +64,5 @@ It is **not** a production-ready hosted SMTP platform.
 - PostgreSQL-backed OIDC membership and migration `000015` were not executed
   because `TEST_DATABASE_URL` was unavailable. The original RustSec findings
   and production-readiness limitations remain open.
+- POP3 is explicitly excluded from the first production release; the
+  `smtp-pop3` crate is parser/state-machine fixture code only.

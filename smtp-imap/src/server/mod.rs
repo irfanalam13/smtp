@@ -1,14 +1,10 @@
-use std::{
-    env,
-    io::{self, Cursor},
-    net::SocketAddr,
-    path::Path,
-    sync::Arc,
-    time::Duration,
-};
+use std::{env, io, net::SocketAddr, path::Path, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
-use rustls::{ServerConfig, pki_types::CertificateDer};
+use rustls::{
+    ServerConfig,
+    pki_types::{CertificateDer, pem::PemObject},
+};
 use smtp_core::{MailboxFlag, MailboxStore};
 use smtp_ingress::{Authenticator, PostgresAuthRateLimiter, PostgresAuthenticator};
 use sqlx::{PgPool, Row, postgres::PgPoolOptions};

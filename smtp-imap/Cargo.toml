@@ -9,7 +9,6 @@ argon2 = "0.5.3"
 base64.workspace = true
 chrono.workspace = true
 rustls = { version = "0.23.35", default-features = false, features = ["ring", "std"] }
-rustls-pemfile = "2.2.0"
 serde_json.workspace = true
 sqlx.workspace = true
 smtp-core = { package = "shared-types", path = "../smtp-core" }

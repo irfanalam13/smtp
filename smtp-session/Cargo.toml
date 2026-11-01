@@ -15,7 +15,6 @@ sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio
 chrono = { version = "0.4.42", features = ["clock"] }
 thiserror = "2.0.17"
 rustls = { version = "0.23.35", default-features = false, features = ["ring", "std"] }
-rustls-pemfile = "2.2.0"
 tokio-rustls = "0.26.4"
 argon2 = "0.5.3"
 base64 = "0.22.1"
@@ -23,7 +22,7 @@ serde_json.workspace = true
 serde.workspace = true
 shared-types = { path = "../smtp-core" }
 mail-auth = "0.14.1"
-quick-xml = "0.38.3"
+quick-xml = "0.41.0"
 
 [dev-dependencies]
 rcgen = "0.13.2"

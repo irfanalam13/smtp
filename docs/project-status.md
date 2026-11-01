@@ -102,6 +102,8 @@ Phases 01–10 is in the [phase integration review](phase-integration.md).
   and revocable browser sessions still require pre-provisioned identities.
 - Connect the durable mailbox operations to a real authenticated IMAP service,
   or explicitly keep IMAP/POP3 out of product scope.
+- POP3 is explicitly out of scope for the first production release;
+  `smtp-pop3` is parser/state-machine fixture code only and is not deployed.
 - Complete M08 with message-retention/deletion workflows,
   lifecycle/permission integration and reconciliation evidence; complete
   outbound sent-copy/drafts projection. Provide object storage and production
