@@ -1354,6 +1354,64 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "503": { description: Delivery activity is temporarily unavailable }
+  /v1/webhooks:
+    get:
+      summary: List webhook subscriptions
+      tags: [Control plane]
+      responses:
+        "200":
+          description: Tenant-scoped webhook subscriptions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/WebhookSubscription" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { description: Control-plane storage is temporarily unavailable }
+    post:
+      summary: Create a webhook subscription
+      description: The returned signing secret is shown once. Delivery records are durable and signed with this secret.
+      tags: [Control plane]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint, event_types]
+              properties:
+                endpoint: { type: string, format: uri, maxLength: 2048 }
+                event_types: { type: array, minItems: 1, items: { type: string, maxLength: 128 } }
+      responses:
+        "201":
+          description: Created subscription and one-time signing secret
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [subscription, secret]
+                properties:
+                  subscription: { $ref: "#/components/schemas/WebhookSubscription" }
+                  secret: { type: string }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { description: Control-plane storage is temporarily unavailable }
+  /v1/webhooks/{id}:
+    delete:
+      summary: Delete a webhook subscription
+      tags: [Control plane]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Subscription deleted }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/suppressions/{recipient}:
     delete:
       summary: Deactivate a recipient suppression
@@ -1557,6 +1615,16 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/DeliveryEvent" }
+    WebhookSubscription:
+      type: object
+      required: [id, endpoint, event_types, active, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        endpoint: { type: string, format: uri }
+        event_types: { type: array, items: { type: string } }
+        active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     SubmissionRequest:
       type: object
       additionalProperties: false
