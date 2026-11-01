@@ -86,7 +86,7 @@ func (h Handler) startGoogleOAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Development / simulated mode
-	if h.DevMode || !h.AuthSessions.SecureCookies {
+	if h.DevMode {
 		renderDevOAuthPage(w, "Google", "developer@gmail.com", "Google Developer", state, "/api/backend/v1/auth/oauth/google/callback")
 		return
 	}
@@ -110,11 +110,10 @@ func (h Handler) completeGoogleOAuth(w http.ResponseWriter, r *http.Request) {
 		h.redirectOIDCError(w, r, "oidc_failed")
 		return
 	}
-	h.clearOIDCFlowCookies(w)
-
 	var subject, email, name string
 
-	if queryCode == "dev-google-code" && (h.DevMode || !h.AuthSessions.SecureCookies) {
+	if queryCode == "dev-google-code" && h.DevMode {
+		h.clearOIDCFlowCookies(w)
 		email = strings.TrimSpace(r.URL.Query().Get("email"))
 		if email == "" {
 			email = "developer@gmail.com"
@@ -126,6 +125,7 @@ func (h Handler) completeGoogleOAuth(w http.ResponseWriter, r *http.Request) {
 		subject = "google:dev-" + email
 	} else if h.SocialOAuth.GoogleClientID != "" && h.SocialOAuth.GoogleClientSecret != "" {
 		verifierCookie, _ := r.Cookie(h.oidcCookieName("pkce"))
+		h.clearOIDCFlowCookies(w)
 		pkceVerifier := ""
 		if verifierCookie != nil {
 			pkceVerifier = verifierCookie.Value
@@ -172,7 +172,7 @@ func (h Handler) completeGoogleOAuth(w http.ResponseWriter, r *http.Request) {
 			EmailVerified bool   `json:"email_verified"`
 			Name          string `json:"name"`
 		}
-		if err := json.NewDecoder(userResp.Body).Decode(&userInfo); err != nil {
+		if err := decodeOAuthJSON(userResp, &userInfo); err != nil {
 			slog.Error("google userinfo decode failed", "error", err)
 			h.redirectOIDCError(w, r, "oidc_failed")
 			return
@@ -258,13 +258,13 @@ func (h Handler) startGitHubOAuth(w http.ResponseWriter, r *http.Request) {
 				TokenURL: "https://github.com/login/oauth/access_token",
 			},
 		}
-		authURL := oauthConf.AuthCodeURL(state)
+		authURL := oauthConf.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier))
 		http.Redirect(w, r, authURL, http.StatusFound)
 		return
 	}
 
 	// Development / simulated mode
-	if h.DevMode || !h.AuthSessions.SecureCookies {
+	if h.DevMode {
 		renderDevOAuthPage(w, "GitHub", "dev@github.com", "github-developer", state, "/api/backend/v1/auth/oauth/github/callback")
 		return
 	}
@@ -279,20 +279,20 @@ func (h Handler) completeGitHubOAuth(w http.ResponseWriter, r *http.Request) {
 	}
 	stateCookie, stateErr := r.Cookie(h.oidcCookieName("state"))
 	tenantCookie, _ := r.Cookie(h.oidcCookieName("tenant"))
+	verifierCookie, verifierErr := r.Cookie(h.oidcCookieName("pkce"))
 	queryState := r.URL.Query().Get("state")
 	queryCode := r.URL.Query().Get("code")
 
-	if stateErr != nil || queryState == "" || queryCode == "" ||
+	if stateErr != nil || verifierErr != nil || queryState == "" || queryCode == "" ||
 		subtle.ConstantTimeCompare([]byte(queryState), []byte(stateCookie.Value)) != 1 {
 		h.clearOIDCFlowCookies(w)
 		h.redirectOIDCError(w, r, "oidc_failed")
 		return
 	}
-	h.clearOIDCFlowCookies(w)
-
 	var subject, email, name string
 
-	if queryCode == "dev-github-code" && (h.DevMode || !h.AuthSessions.SecureCookies) {
+	if queryCode == "dev-github-code" && h.DevMode {
+		h.clearOIDCFlowCookies(w)
 		email = strings.TrimSpace(r.URL.Query().Get("email"))
 		if email == "" {
 			email = "dev@github.com"
@@ -303,6 +303,7 @@ func (h Handler) completeGitHubOAuth(w http.ResponseWriter, r *http.Request) {
 		}
 		subject = "github:dev-" + name
 	} else if h.SocialOAuth.GitHubClientID != "" && h.SocialOAuth.GitHubClientSecret != "" {
+		h.clearOIDCFlowCookies(w)
 		redirectURI := h.SocialOAuth.GitHubRedirectURI
 		if redirectURI == "" {
 			redirectURI = h.AuthSessions.PublicOrigin + "/api/backend/v1/auth/oauth/github/callback"
@@ -319,7 +320,7 @@ func (h Handler) completeGitHubOAuth(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 
-		token, err := oauthConf.Exchange(ctx, queryCode)
+		token, err := oauthConf.Exchange(ctx, queryCode, oauth2.VerifierOption(verifierCookie.Value))
 		if err != nil {
 			slog.Error("github token exchange failed", "error", err)
 			h.redirectOIDCError(w, r, "oidc_failed")
@@ -361,7 +362,7 @@ func (h Handler) completeGitHubOAuth(w http.ResponseWriter, r *http.Request) {
 				Primary  bool   `json:"primary"`
 				Verified bool   `json:"verified"`
 			}
-			if json.NewDecoder(emailsResp.Body).Decode(&emails) == nil {
+			if decodeOAuthJSON(emailsResp, &emails) == nil {
 				for _, item := range emails {
 					if item.Primary && item.Verified {
 						email = item.Email
@@ -390,6 +391,21 @@ func (h Handler) completeGitHubOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, h.AuthSessions.PublicOrigin+"/home", http.StatusFound)
+}
+
+func decodeOAuthJSON(response *http.Response, target any) error {
+	if response == nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("oauth provider returned an unsuccessful response")
+	}
+	contentType := strings.ToLower(response.Header.Get("Content-Type"))
+	if !strings.HasPrefix(contentType, "application/json") {
+		return fmt.Errorf("oauth provider returned an unexpected content type")
+	}
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 64<<10))
+	if err := decoder.Decode(target); err != nil {
+		return fmt.Errorf("decode oauth provider response: %w", err)
+	}
+	return nil
 }
 
 func renderDevOAuthPage(w http.ResponseWriter, provider, defaultEmail, defaultName, state, callbackURI string) {

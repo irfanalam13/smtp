@@ -87,8 +87,8 @@ func (h Handler) principal(w http.ResponseWriter, r *http.Request, scope string)
 		}
 		return Principal{}, false
 	}
-	if !h.Store.Allow("principal:"+p.TenantID+":"+scope, 120, time.Minute) ||
-		!h.Store.Allow("ip:"+r.RemoteAddr+":"+scope, 240, time.Minute) {
+	if !h.allow(r.Context(), "principal:"+p.TenantID+":"+scope, 120, time.Minute) ||
+		!h.allow(r.Context(), "ip:"+requestClientIP(r)+":"+scope, 240, time.Minute) {
 		w.Header().Set("Retry-After", "60")
 		Error(w, 429, "rate_limited", "too many requests")
 		return Principal{}, false

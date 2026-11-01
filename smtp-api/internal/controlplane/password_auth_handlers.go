@@ -3,8 +3,6 @@ package controlplane
 import (
 	"context"
 	"errors"
-	"fmt"
-	"log/slog"
 	"net/http"
 	"net/mail"
 	"net/url"
@@ -79,7 +77,7 @@ func (h Handler) signUp(w http.ResponseWriter, r *http.Request) {
 	if h.DevMode {
 		limit, window, retryAfter = 30, time.Minute, "60"
 	}
-	if !h.Store.Allow("auth-signup:"+requestClientIP(r), limit, window) {
+	if !h.allow(r.Context(), "auth-signup:"+requestClientIP(r), limit, window) {
 		w.Header().Set("Retry-After", retryAfter)
 		Error(w, http.StatusTooManyRequests, "rate_limited", "too many account registration attempts")
 		return
@@ -148,10 +146,15 @@ func (h Handler) signUp(w http.ResponseWriter, r *http.Request) {
 	if organizationName == "" {
 		organizationName = strings.TrimSpace(request.FirstName + " " + request.LastName)
 	}
-	registered, err := h.Postgres.RegisterPasswordAccountWithProfile(
+	verifyURL := h.AuthSessions.PublicOrigin + "/verify-email?token=" + url.QueryEscape(token)
+	registered, err := h.Postgres.RegisterPasswordAccountWithProfileAndEmail(
 		r.Context(), request.FirstName, request.LastName, request.PhoneNumber,
 		request.Country, email, passwordHash, organizationName,
-		tokenHash, time.Now().Add(emailVerificationTokenLifetime),
+		tokenHash, time.Now().Add(emailVerificationTokenLifetime), h.AuthEmailKey,
+		authmail.Message{
+			To: email, Subject: "Verify your SMTP Platform account",
+			Body: "Verify your email address to activate your account. This link expires in 24 hours:\n\n" + verifyURL,
+		},
 	)
 	if errors.Is(err, ErrConflict) {
 		JSON(w, http.StatusAccepted, map[string]string{
@@ -164,26 +167,21 @@ func (h Handler) signUp(w http.ResponseWriter, r *http.Request) {
 		h.databaseError(w, "register password account", err)
 		return
 	}
-	verifyURL := h.AuthSessions.PublicOrigin + "/verify-email?token=" + url.QueryEscape(token)
-	_ = h.sendAccountEmail(r, email, "Verify your SMTP Platform account",
-		fmt.Sprintf("Verify your email address to activate the account for %s:\n\n%s\n\nThis link expires in 24 hours.", strings.TrimSpace(request.OrganizationName), verifyURL))
-
 	if h.DevMode {
-		_ = h.Postgres.AutoVerifyUser(r.Context(), registered.UserID)
+		if err := h.Postgres.AutoVerifyUser(r.Context(), registered.UserID); err != nil {
+			h.databaseError(w, "verify development account", err)
+			return
+		}
 		JSON(w, http.StatusAccepted, map[string]string{
-			"status":           "verified",
-			"message":          "Account created and verified. You can now sign in with your password.",
-			"tenant_id":        registered.TenantID,
-			"verification_url": verifyURL,
+			"status":  "verified",
+			"message": "Account created and verified. You can now sign in with your password.",
 		})
 		return
 	}
 
 	JSON(w, http.StatusAccepted, map[string]string{
-		"status":           "verification_pending",
-		"message":          "Check your email for a verification link before signing in.",
-		"tenant_id":        registered.TenantID,
-		"verification_url": verifyURL,
+		"status":  "verification_pending",
+		"message": "If registration can proceed, a verification email will be sent.",
 	})
 }
 
@@ -230,7 +228,7 @@ func (h Handler) passwordLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	emailHash := smtpAuth.HashSecret(email)
-	if !h.Store.Allow("auth-login:"+requestClientIP(r)+":"+string(emailHash[:8]), 10, time.Minute) {
+	if !h.allow(r.Context(), "auth-login:"+requestClientIP(r)+":"+string(emailHash[:8]), 10, time.Minute) {
 		w.Header().Set("Retry-After", "60")
 		Error(w, http.StatusTooManyRequests, "rate_limited", "too many sign-in attempts")
 		return
@@ -353,7 +351,7 @@ func (h Handler) sendAccountLink(w http.ResponseWriter, r *http.Request, purpose
 		Error(w, http.StatusForbidden, "forbidden", "request origin is not allowed")
 		return
 	}
-	if !h.Store.Allow("auth-email:"+purpose+":"+requestClientIP(r), 5, time.Hour) {
+	if !h.allow(r.Context(), "auth-email:"+purpose+":"+requestClientIP(r), 5, time.Hour) {
 		w.Header().Set("Retry-After", "3600")
 		Error(w, http.StatusTooManyRequests, "rate_limited", "too many email requests")
 		return
@@ -388,18 +386,14 @@ func (h Handler) sendAccountLink(w http.ResponseWriter, r *http.Request, purpose
 		h.databaseError(w, "create account email token", err)
 		return
 	}
-	created, err := h.Postgres.CreatePasswordEmailToken(
-		r.Context(), email, purpose, tokenHash, time.Now().Add(limit),
+	link := h.AuthSessions.PublicOrigin + path + url.QueryEscape(token)
+	_, err = h.Postgres.CreatePasswordEmailTokenWithEmail(
+		r.Context(), email, purpose, tokenHash, time.Now().Add(limit), h.AuthEmailKey,
+		authmail.Message{To: email, Subject: subject, Body: bodyText + link},
 	)
 	if err != nil {
 		h.databaseError(w, "create account email token", err)
 		return
-	}
-	if created {
-		link := h.AuthSessions.PublicOrigin + path + url.QueryEscape(token)
-		if err := h.sendAccountEmail(r, email, subject, bodyText+link); err != nil {
-			slog.Error("account email delivery failed", "operation", "account."+purpose)
-		}
 	}
 	JSON(w, http.StatusAccepted, response)
 }
@@ -413,7 +407,7 @@ func (h Handler) resetPassword(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusForbidden, "forbidden", "request origin is not allowed")
 		return
 	}
-	if !h.Store.Allow("auth-password-reset:"+requestClientIP(r), 5, time.Hour) {
+	if !h.allow(r.Context(), "auth-password-reset:"+requestClientIP(r), 5, time.Hour) {
 		w.Header().Set("Retry-After", "3600")
 		Error(w, http.StatusTooManyRequests, "rate_limited", "too many password recovery attempts")
 		return

@@ -16,7 +16,7 @@ pub use auth::{
     AuthRateLimiter, AuthenticatedIdentity, AuthenticationError, Authenticator,
     PostgresAuthRateLimiter, PostgresAuthenticator, SenderAuthorizer,
 };
-pub use config::Config;
+pub use config::{Config, ListenerProfile};
 pub use message::Message;
 pub use server::Server;
 pub use session::{Session, SessionDisposition, SessionRunResult};

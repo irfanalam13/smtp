@@ -83,8 +83,15 @@ func run() error {
 	var authMailer authmail.Sender
 	if configuredMailer != nil {
 		authMailer = configuredMailer
-	} else if devMode || !authSessions.SecureCookies {
+	} else if devMode {
 		authMailer = &authmail.DevLogger{}
+	}
+	authEmailKey := []byte(strings.TrimSpace(os.Getenv("AUTH_EMAIL_ENCRYPTION_KEY")))
+	if len(authEmailKey) == 0 && devMode {
+		authEmailKey = []byte("local-development-auth-email-key-change-before-deploy")
+	}
+	if !devMode && len(authEmailKey) < 32 {
+		return errors.New("AUTH_EMAIL_ENCRYPTION_KEY must contain at least 32 bytes in production")
 	}
 	dummyPasswordHash, err := smtpAuth.HashPassword("dummy-password-verifier-not-for-login")
 	if err != nil {
@@ -102,6 +109,10 @@ func run() error {
 	}))
 	metrics := observability.NewMetrics()
 	socialOAuth := socialOAuthConfigFromEnv(os.Getenv, authSessions.PublicOrigin)
+	rateLimitKey := []byte(strings.TrimSpace(os.Getenv("API_RATE_LIMIT_HMAC_KEY")))
+	if !devMode && len(rateLimitKey) < 32 {
+		return fmt.Errorf("API_RATE_LIMIT_HMAC_KEY must contain at least 32 bytes in production")
+	}
 	control := controlplane.Handler{
 		Store:             controlplane.NewStore(),
 		Postgres:          repository,
@@ -113,6 +124,8 @@ func run() error {
 		AuthSessions:      authSessions,
 		SocialOAuth:       socialOAuth,
 		JWT:               jwtConfig,
+		RateLimitHMACKey:  rateLimitKey,
+		AuthEmailKey:      authEmailKey,
 		DevMode:           devMode,
 		Metrics:           metrics,
 	}
@@ -142,6 +155,9 @@ func run() error {
 	go func() {
 		serverErrors <- server.ListenAndServe()
 	}()
+	if authMailer != nil {
+		go repository.RunAuthEmailOutbox(shutdownCtx, authMailer, authEmailKey)
+	}
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()

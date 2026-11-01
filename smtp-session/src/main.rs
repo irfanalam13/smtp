@@ -3,7 +3,7 @@ use std::{io, net::SocketAddr, sync::Arc};
 
 use mail_queue::{Queue, QueueConfig};
 use smtp_ingress::{
-    Config, Server,
+    Config, ListenerProfile, Server,
     email_auth::EmailAuthenticator,
     inbound::PostgresInboundStore,
     scanner::{ClamdScanner, SpamAssassinScanner},
@@ -11,12 +11,38 @@ use smtp_ingress::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut config = Config::default();
+    let listener_profile = match std::env::var("SMTP_LISTENER_PROFILE")
+        .unwrap_or_else(|_| "loopback-development".to_owned())
+        .as_str()
+    {
+        "loopback-development" => ListenerProfile::LoopbackDevelopment,
+        "inbound-mta" => ListenerProfile::InboundMta,
+        "submission" => ListenerProfile::Submission,
+        other => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("unsupported SMTP_LISTENER_PROFILE: {other}"),
+            )
+            .into());
+        }
+    };
+    let mut config = Config {
+        listener_profile,
+        ..Config::default()
+    };
+    config.implicit_tls = env_bool("SMTP_IMPLICIT_TLS", false)?;
     if let Some(address) = std::env::var_os("SMTP_BIND_ADDR") {
         config.bind_addr = address
             .to_string_lossy()
             .parse::<SocketAddr>()
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    } else {
+        config.bind_addr = match (listener_profile, config.implicit_tls) {
+            (ListenerProfile::InboundMta, _) => "0.0.0.0:25".parse().expect("valid SMTP port"),
+            (ListenerProfile::Submission, true) => "0.0.0.0:465".parse().expect("valid SMTP port"),
+            (ListenerProfile::Submission, false) => "0.0.0.0:587".parse().expect("valid SMTP port"),
+            (ListenerProfile::LoopbackDevelopment, _) => config.bind_addr,
+        };
     }
     config.max_message_bytes = env_usize("SMTP_MAX_MESSAGE_BYTES", config.max_message_bytes)?;
     let inbound_enabled = env_bool("SMTP_INBOUND_ENABLED", false)?;
@@ -38,7 +64,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    config.implicit_tls = env_bool("SMTP_IMPLICIT_TLS", false)?;
     config.enable_8bitmime = env_bool("SMTP_ENABLE_8BITMIME", false)?;
     let auth_enabled = env_bool("SMTP_AUTH_ENABLED", false)?;
     config.require_authentication = env_bool("SMTP_REQUIRE_AUTHENTICATION", auth_enabled)?;

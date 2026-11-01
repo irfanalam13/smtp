@@ -16,6 +16,7 @@ use shared_types::MAX_CANONICAL_MESSAGE_BYTES;
 
 #[derive(Clone)]
 pub struct Config {
+    pub listener_profile: ListenerProfile,
     pub bind_addr: SocketAddr,
     pub server_name: String,
     pub authenticator: Option<Arc<dyn Authenticator>>,
@@ -43,6 +44,13 @@ pub struct Config {
     pub tls_reload_state: Option<Arc<RwLock<TlsReloadState>>>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ListenerProfile {
+    LoopbackDevelopment,
+    InboundMta,
+    Submission,
+}
+
 pub struct TlsReloadState {
     config: Arc<ServerConfig>,
     certificate_hash: [u8; 32],
@@ -52,6 +60,7 @@ pub struct TlsReloadState {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            listener_profile: ListenerProfile::LoopbackDevelopment,
             bind_addr: "127.0.0.1:2525".parse().expect("valid default address"),
             server_name: "smtp-test".into(),
             authenticator: None,
@@ -166,6 +175,32 @@ impl Config {
                 "unauthenticated SMTP may only bind to loopback without an inbound recipient policy",
             ));
         }
+        match self.listener_profile {
+            ListenerProfile::InboundMta => {
+                if self.require_authentication || self.inbound.is_none() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "inbound MTA profile requires inbound routing and forbids mandatory AUTH",
+                    ));
+                }
+            }
+            ListenerProfile::Submission => {
+                if !self.require_authentication || self.authenticator.is_none() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "submission profile requires authenticated SMTP credentials",
+                    ));
+                }
+            }
+            ListenerProfile::LoopbackDevelopment => {
+                if !self.bind_addr.ip().is_loopback() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "loopback development SMTP profile must bind to loopback",
+                    ));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -272,7 +307,7 @@ fn build_tls_config(
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, ListenerProfile};
     use crate::{AuthenticatedIdentity, AuthenticationError, Authenticator, SenderAuthorizer};
     use async_trait::async_trait;
     use std::{fs, path::PathBuf};
@@ -394,5 +429,26 @@ mod tests {
             ..Config::default()
         };
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn listener_profiles_reject_incomplete_role_configuration() {
+        let inbound = Config {
+            listener_profile: ListenerProfile::InboundMta,
+            ..Config::default()
+        };
+        assert!(inbound.validate().is_err());
+
+        let submission = Config {
+            listener_profile: ListenerProfile::Submission,
+            ..Config::default()
+        };
+        assert!(submission.validate().is_err());
+
+        let public_development = Config {
+            bind_addr: "0.0.0.0:2525".parse().unwrap(),
+            ..Config::default()
+        };
+        assert!(public_development.validate().is_err());
     }
 }

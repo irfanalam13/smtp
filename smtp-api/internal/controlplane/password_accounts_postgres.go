@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"example.com/smtp-platform/smtp-api/internal/authmail"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -104,6 +105,41 @@ func (repository *PostgreSQLRepository) RegisterPasswordAccountWithProfile(
 	tokenHash [sha256.Size]byte,
 	tokenExpiresAt time.Time,
 ) (RegisteredAccount, error) {
+	return repository.registerPasswordAccountWithProfile(
+		ctx, firstName, lastName, phoneNumber, country, email, passwordHash,
+		organizationName, tokenHash, tokenExpiresAt, nil, nil,
+	)
+}
+
+func (repository *PostgreSQLRepository) RegisterPasswordAccountWithProfileAndEmail(
+	ctx context.Context,
+	firstName, lastName, phoneNumber, country, email, passwordHash,
+	organizationName string,
+	tokenHash [sha256.Size]byte,
+	tokenExpiresAt time.Time,
+	encryptionKey []byte,
+	message authmail.Message,
+) (RegisteredAccount, error) {
+	return repository.registerPasswordAccountWithProfile(
+		ctx, firstName, lastName, phoneNumber, country, email, passwordHash,
+		organizationName, tokenHash, tokenExpiresAt, encryptionKey, &message,
+	)
+}
+
+func (repository *PostgreSQLRepository) registerPasswordAccountWithProfile(
+	ctx context.Context,
+	firstName string,
+	lastName string,
+	phoneNumber string,
+	country string,
+	email string,
+	passwordHash string,
+	organizationName string,
+	tokenHash [sha256.Size]byte,
+	tokenExpiresAt time.Time,
+	encryptionKey []byte,
+	notification *authmail.Message,
+) (RegisteredAccount, error) {
 	if !validEmail(email) || passwordHash == "" || len(passwordHash) > 512 ||
 		!validName(firstName, 2, 50) || !validName(lastName, 2, 50) ||
 		!validOptionalField(phoneNumber, 7, 32) || !validOptionalField(country, 2, 100) ||
@@ -152,6 +188,15 @@ func (repository *PostgreSQLRepository) RegisterPasswordAccountWithProfile(
 	if err := insertEmailToken(ctx, tx, account.UserID, "verify_email", tokenHash, tokenExpiresAt); err != nil {
 		return RegisteredAccount{}, err
 	}
+	if notification != nil {
+		if err := repository.enqueueAuthEmail(
+			ctx, tx, encryptionKey,
+			"verify_email:"+account.UserID+":"+tokenExpiresAt.UTC().Format(time.RFC3339Nano),
+			*notification,
+		); err != nil {
+			return RegisteredAccount{}, err
+		}
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO audit_events (tenant_id, actor_user_id, action, target_type, target_id)
 		VALUES ($1, $2, 'account.signup', 'user', $3)
@@ -170,6 +215,31 @@ func (repository *PostgreSQLRepository) CreatePasswordEmailToken(
 	purpose string,
 	tokenHash [sha256.Size]byte,
 	expiresAt time.Time,
+) (bool, error) {
+	return repository.createPasswordEmailToken(ctx, email, purpose, tokenHash, expiresAt, nil, nil)
+}
+
+func (repository *PostgreSQLRepository) CreatePasswordEmailTokenWithEmail(
+	ctx context.Context,
+	email, purpose string,
+	tokenHash [sha256.Size]byte,
+	expiresAt time.Time,
+	encryptionKey []byte,
+	message authmail.Message,
+) (bool, error) {
+	return repository.createPasswordEmailToken(
+		ctx, email, purpose, tokenHash, expiresAt, encryptionKey, &message,
+	)
+}
+
+func (repository *PostgreSQLRepository) createPasswordEmailToken(
+	ctx context.Context,
+	email string,
+	purpose string,
+	tokenHash [sha256.Size]byte,
+	expiresAt time.Time,
+	encryptionKey []byte,
+	notification *authmail.Message,
 ) (bool, error) {
 	if !validEmail(email) || (purpose != "verify_email" && purpose != "reset_password") ||
 		!expiresAt.After(time.Now()) {
@@ -206,6 +276,16 @@ func (repository *PostgreSQLRepository) CreatePasswordEmailToken(
 	}
 	if err := insertEmailToken(ctx, tx, userID, purpose, tokenHash, expiresAt); err != nil {
 		return false, err
+	}
+	if notification != nil {
+		if err := repository.enqueueAuthEmail(
+			ctx, tx,
+			encryptionKey,
+			purpose+":"+userID+":"+expiresAt.UTC().Format(time.RFC3339Nano),
+			*notification,
+		); err != nil {
+			return false, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit account email token: %w", err)
