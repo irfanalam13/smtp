@@ -62,3 +62,22 @@ func TestSignRejectsInvalidInputs(t *testing.T) {
 		})
 	}
 }
+
+func TestVerifyAcceptsExactSignatureAndRejectsTamperingOrStaleTimestamp(t *testing.T) {
+	const secret = "0123456789abcdef0123456789abcdef"
+	now := time.Unix(1_700_000_000, 0)
+	payload := []byte(`{"type":"delivery.sent"}`)
+	signed, err := Sign([]byte(secret), "evt_12345", now, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify([]byte(secret), signed, payload, now.Add(30*time.Second), time.Minute); err != nil {
+		t.Fatalf("valid signature rejected: %v", err)
+	}
+	if err := Verify([]byte(secret), signed, []byte(`{"type":"delivery.failed"}`), now, time.Minute); err == nil {
+		t.Fatal("tampered payload was accepted")
+	}
+	if err := Verify([]byte(secret), signed, payload, now.Add(2*time.Minute), time.Minute); err == nil {
+		t.Fatal("stale signature was accepted")
+	}
+}
