@@ -1124,6 +1124,12 @@ mod tests {
                 .expect("prune expired idempotency records"),
             1
         );
+        assert_eq!(
+            retention::prune_expired_messages_batch(&pool)
+                .await
+                .expect("prune expired retained messages"),
+            0
+        );
 
         let content_uri = format!(
             "/v1/mailboxes/{mailbox_id}/messages/{}/content",
