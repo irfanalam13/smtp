@@ -8,14 +8,81 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
 )
 
 var (
 	ErrPasswordCapacity = errors.New("password hashing capacity is temporarily exhausted")
+	ErrPasswordPolicy   = errors.New("password does not meet the configured policy")
 	passwordSlots       = make(chan struct{}, 2)
 )
+
+type PasswordPolicy struct {
+	MinLength             int
+	RequireUppercase      bool
+	RequireLowercase      bool
+	RequireNumber         bool
+	RequireSpecial        bool
+	RejectCommonPasswords bool
+}
+
+var DefaultPasswordPolicy = PasswordPolicy{
+	MinLength:             8,
+	RequireUppercase:      true,
+	RequireLowercase:      true,
+	RequireNumber:         true,
+	RequireSpecial:        true,
+	RejectCommonPasswords: true,
+}
+
+func ValidatePassword(password string, policy PasswordPolicy) error {
+	if policy.MinLength < 8 {
+		policy.MinLength = 8
+	}
+	if !utf8Valid(password) || len(password) > 1024 || len([]rune(password)) < policy.MinLength {
+		return ErrPasswordPolicy
+	}
+	var upper, lower, number, special bool
+	for _, char := range password {
+		switch {
+		case unicode.IsUpper(char):
+			upper = true
+		case unicode.IsLower(char):
+			lower = true
+		case unicode.IsNumber(char):
+			number = true
+		case unicode.IsPunct(char) || unicode.IsSymbol(char):
+			special = true
+		case unicode.IsControl(char):
+			return ErrPasswordPolicy
+		}
+	}
+	if policy.RequireUppercase && !upper || policy.RequireLowercase && !lower ||
+		policy.RequireNumber && !number || policy.RequireSpecial && !special {
+		return ErrPasswordPolicy
+	}
+	if policy.RejectCommonPasswords {
+		switch strings.ToLower(password) {
+		case "password", "password123", "12345678", "qwerty123", "letmein123", "welcome123":
+			return ErrPasswordPolicy
+		}
+	}
+	return nil
+}
+
+func utf8Valid(value string) bool {
+	for len(value) > 0 {
+		runeValue, size := utf8.DecodeRuneInString(value)
+		if runeValue == utf8.RuneError && size == 1 {
+			return false
+		}
+		value = value[size:]
+	}
+	return true
+}
 
 func HashPasswordBounded(password string) (string, error) {
 	if !acquirePasswordSlot() {
@@ -55,8 +122,8 @@ const (
 )
 
 func HashPassword(password string) (string, error) {
-	if len(password) < 12 || len(password) > 1024 {
-		return "", errors.New("password length must be between 12 and 1024 bytes")
+	if len(password) < 8 || len(password) > 1024 {
+		return "", errors.New("password length must be between 8 and 1024 bytes")
 	}
 	salt := make([]byte, argonSaltBytes)
 	if _, err := rand.Read(salt); err != nil {

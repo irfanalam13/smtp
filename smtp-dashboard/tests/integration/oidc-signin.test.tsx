@@ -71,4 +71,34 @@ describe("OIDC sign-in", () => {
     );
     expect(alert.getAttribute("role")).toBe("alert");
   });
+
+  it("renders Google and GitHub sign-in links when enabled", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          oidc_enabled: true,
+          google_enabled: true,
+          github_enabled: true,
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<OIDCSignIn />);
+
+    const googleBtn = await screen.findByRole("link", {
+      name: /Continue with Google/i,
+    });
+    expect(googleBtn.getAttribute("href")).toBe(
+      "/api/backend/v1/auth/oauth/google/start",
+    );
+
+    const githubBtn = await screen.findByRole("link", {
+      name: /Continue with GitHub/i,
+    });
+    expect(githubBtn.getAttribute("href")).toBe(
+      "/api/backend/v1/auth/oauth/github/start",
+    );
+  });
 });

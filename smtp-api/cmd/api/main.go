@@ -68,6 +68,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("configure browser sessions: %w", err)
 	}
+	jwtConfig, err := jwtConfigFromEnv(os.Getenv, environment, authSessions.PublicOrigin)
+	if err != nil {
+		return fmt.Errorf("configure JWT authentication: %w", err)
+	}
 	oidcLogin, err := newOIDCLoginFromEnv(os.Getenv, authSessions.PublicOrigin)
 	if err != nil {
 		return fmt.Errorf("configure OIDC login: %w", err)
@@ -79,6 +83,8 @@ func run() error {
 	var authMailer authmail.Sender
 	if configuredMailer != nil {
 		authMailer = configuredMailer
+	} else if devMode || !authSessions.SecureCookies {
+		authMailer = &authmail.DevLogger{}
 	}
 	dummyPasswordHash, err := smtpAuth.HashPassword("dummy-password-verifier-not-for-login")
 	if err != nil {
@@ -95,6 +101,7 @@ func run() error {
 		return repository.Ping(readyCtx) == nil
 	}))
 	metrics := observability.NewMetrics()
+	socialOAuth := socialOAuthConfigFromEnv(os.Getenv, authSessions.PublicOrigin)
 	control := controlplane.Handler{
 		Store:             controlplane.NewStore(),
 		Postgres:          repository,
@@ -104,10 +111,16 @@ func run() error {
 		AuthMailer:        authMailer,
 		DummyPasswordHash: dummyPasswordHash,
 		AuthSessions:      authSessions,
+		SocialOAuth:       socialOAuth,
+		JWT:               jwtConfig,
 		DevMode:           devMode,
 		Metrics:           metrics,
 	}
 	mux.Handle("/v1/", control.Routes())
+	// Keep the versioned public API contract available when the API is deployed
+	// behind a gateway that does not rewrite the /api prefix.
+	mux.Handle("/api/v1/", http.StripPrefix("/api", control.Routes()))
+	mux.Handle("/api/backend/v1/", http.StripPrefix("/api/backend", control.Routes()))
 	mux.HandleFunc("GET /metrics", metrics.Handler)
 
 	addr := os.Getenv("API_ADDR")
@@ -163,6 +176,24 @@ func run() error {
 	return nil
 }
 
+func jwtConfigFromEnv(getenv func(string) string, environment, issuer string) (controlplane.JWTConfig, error) {
+	key := strings.TrimSpace(getenv("AUTH_JWT_SECRET"))
+	development := environment == "development" || environment == "dev"
+	if key == "" && development {
+		// This key is deliberately limited to local development. Deployments must
+		// supply a unique 32+ byte secret through their secret manager.
+		key = "local-development-jwt-secret-change-before-deploy"
+	}
+	if len(key) < 32 {
+		return controlplane.JWTConfig{}, errors.New("AUTH_JWT_SECRET must be at least 32 bytes")
+	}
+	ttl, err := configuredDuration(getenv("AUTH_JWT_TTL"), 15*time.Minute)
+	if err != nil || ttl < time.Minute || ttl > 24*time.Hour {
+		return controlplane.JWTConfig{}, errors.New("AUTH_JWT_TTL must be between 1m and 24h")
+	}
+	return controlplane.JWTConfig{SigningKey: []byte(key), Issuer: issuer, TTL: ttl}, nil
+}
+
 func newOIDCLoginFromEnv(
 	getenv func(string) string,
 	publicOrigin string,
@@ -189,6 +220,25 @@ func newOIDCLoginFromEnv(
 	return smtpAuth.NewOIDCClient(ctx, smtpAuth.OIDCConfig{
 		Issuer: issuer, ClientID: clientID, ClientSecret: clientSecret, RedirectURL: redirectURL,
 	})
+}
+
+func socialOAuthConfigFromEnv(getenv func(string) string, publicOrigin string) controlplane.SocialOAuthConfig {
+	googleRedirect := strings.TrimSpace(getenv("GOOGLE_REDIRECT_URI"))
+	if googleRedirect == "" {
+		googleRedirect = publicOrigin + "/api/backend/v1/auth/oauth/google/callback"
+	}
+	githubRedirect := strings.TrimSpace(getenv("GITHUB_REDIRECT_URI"))
+	if githubRedirect == "" {
+		githubRedirect = publicOrigin + "/api/backend/v1/auth/oauth/github/callback"
+	}
+	return controlplane.SocialOAuthConfig{
+		GoogleClientID:     strings.TrimSpace(getenv("GOOGLE_CLIENT_ID")),
+		GoogleClientSecret: strings.TrimSpace(getenv("GOOGLE_CLIENT_SECRET")),
+		GoogleRedirectURI:  googleRedirect,
+		GitHubClientID:     strings.TrimSpace(getenv("GITHUB_CLIENT_ID")),
+		GitHubClientSecret: strings.TrimSpace(getenv("GITHUB_CLIENT_SECRET")),
+		GitHubRedirectURI:  githubRedirect,
+	}
 }
 
 func browserSessionConfigFromEnv(getenv func(string) string) (controlplane.BrowserSessionConfig, error) {

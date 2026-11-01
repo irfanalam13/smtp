@@ -140,7 +140,8 @@ impl Queue {
         if !matches!(delivery_mode, "direct_mx" | "relay" | "mailpit") {
             return Err(QueueError::InvalidInput("unknown delivery mode".into()));
         }
-        self.claim_delivery_batch_mode(owner, relay_mode, Some(delivery_mode)).await
+        self.claim_delivery_batch_mode(owner, relay_mode, Some(delivery_mode))
+            .await
     }
 
     async fn claim_delivery_batch_mode(

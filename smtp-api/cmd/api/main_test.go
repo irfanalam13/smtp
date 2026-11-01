@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunRequiresDatabaseConfiguration(t *testing.T) {
@@ -171,6 +172,16 @@ func TestBrowserSessionConfigRequiresSecureProductionOrigin(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestJWTConfigRequiresDeploymentSecret(t *testing.T) {
+	if _, err := jwtConfigFromEnv(func(string) string { return "" }, "production", "https://app.example.test"); err == nil {
+		t.Fatal("production JWT configuration accepted an empty secret")
+	}
+	config, err := jwtConfigFromEnv(func(string) string { return "" }, "development", "http://127.0.0.1:3210")
+	if err != nil || len(config.SigningKey) < 32 || config.TTL != 15*time.Minute {
+		t.Fatalf("development JWT config = %#v, %v", config, err)
 	}
 }
 

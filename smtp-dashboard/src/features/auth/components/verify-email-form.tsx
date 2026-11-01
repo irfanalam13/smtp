@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useToast } from "@/components/feedback/toast";
 import { verifyEmail } from "../services/password-auth-api";
 
 export function VerifyEmailForm({ token }: { token: string }) {
+  const { toast } = useToast();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [verified, setVerified] = useState(false);
@@ -19,8 +21,15 @@ export function VerifyEmailForm({ token }: { token: string }) {
     try {
       await verifyEmail(token);
       setVerified(true);
+      toast({
+        tone: "success",
+        title: "Email verified",
+        message: "Your email is verified. You can now sign in.",
+      });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Email verification failed.");
+      const message = reason instanceof Error ? reason.message : "Email verification failed.";
+      setError(message);
+      toast({ tone: "error", title: "Email verification failed", message });
     } finally {
       setBusy(false);
     }

@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import { useToast } from "@/components/feedback/toast";
 import {
   getAuthCapabilities,
   requestPasswordReset,
 } from "../services/password-auth-api";
 
 export function ForgotPasswordForm() {
+  const { toast } = useToast();
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -26,11 +28,13 @@ export function ForgotPasswordForm() {
       .catch(() => {
         if (!controller.signal.aborted) {
           setEnabled(false);
-          setError("Password recovery configuration could not be loaded.");
+          const message = "Password recovery configuration could not be loaded.";
+          setError(message);
+          toast({ tone: "error", title: "Recovery unavailable", message });
         }
       });
     return () => controller.abort();
-  }, []);
+  }, [toast]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,8 +43,15 @@ export function ForgotPasswordForm() {
     try {
       await requestPasswordReset(email);
       setSubmitted(true);
+      toast({
+        tone: "success",
+        title: "Recovery email requested",
+        message: "If an account can be recovered, password-reset instructions have been sent.",
+      });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "The request failed.");
+      const message = reason instanceof Error ? reason.message : "The request failed.";
+      setError(message);
+      toast({ tone: "error", title: "Request failed", message });
     } finally {
       setBusy(false);
     }

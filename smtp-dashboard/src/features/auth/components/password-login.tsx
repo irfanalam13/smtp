@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import { useToast } from "@/components/feedback/toast";
 import { ApiError } from "@/lib/api/json-client";
 import {
   getAuthCapabilities,
@@ -12,29 +13,33 @@ import {
 
 export function PasswordLogin() {
   const router = useRouter();
+  const { toast } = useToast();
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [tenantID, setTenantID] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const controller = new AbortController();
-    void getAuthCapabilities(controller.signal)
+    let mounted = true;
+    void getAuthCapabilities()
       .then((capabilities) => {
-        if (!controller.signal.aborted) {
+        if (mounted) {
           setEnabled(capabilities.password_login_enabled);
         }
       })
       .catch(() => {
-        if (!controller.signal.aborted) {
+        if (mounted) {
           setEnabled(false);
-          setError("Sign-in configuration could not be loaded. Try again later.");
+          const message = "Sign-in configuration could not be loaded. Try again later.";
+          setError(message);
+          toast({ tone: "error", title: "Sign-in unavailable", message });
         }
       });
-    return () => controller.abort();
-  }, []);
+    return () => {
+      mounted = false;
+    };
+  }, [toast]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -44,21 +49,21 @@ export function PasswordLogin() {
       await passwordLogin({
         email,
         password,
-        ...(tenantID.trim() ? { tenant_id: tenantID.trim() } : {}),
       });
       router.replace("/home");
       router.refresh();
     } catch (reason) {
       const code = reason instanceof ApiError ? reason.code : null;
-      setError(
+      const message =
         code === "tenant_selection_required"
           ? "This account belongs to multiple organizations. Enter the organization ID and try again."
           : code === "email_not_verified"
             ? "Verify your email address before signing in. Use the resend-verification option on the signup page if needed."
             : reason instanceof Error
               ? reason.message
-              : "Sign-in failed. Please try again.",
-      );
+              : "Sign-in failed. Please try again.";
+      setError(message);
+      toast({ tone: "error", title: "Sign-in failed", message });
     } finally {
       setBusy(false);
     }
@@ -103,16 +108,20 @@ export function PasswordLogin() {
               value={password}
             />
           </label>
+          {/*
+          Organization ID remains supported by the backend but is intentionally
+          hidden until organization selection is needed in the frontend.
           <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
-            Organization ID <span className="font-normal text-zinc-500">(optional)</span>
+            Organization ID (optional)
             <input
               autoComplete="off"
               className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm focus-visible:outline-2 focus-visible:outline-emerald-700"
               onChange={(event) => setTenantID(event.target.value)}
-              placeholder="Required if your account has multiple organizations"
+              placeholder="Optional organization ID"
               value={tenantID}
             />
           </label>
+          */}
           <button
             className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={busy}

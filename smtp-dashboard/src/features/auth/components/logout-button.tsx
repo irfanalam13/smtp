@@ -3,9 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { requestJson } from "@/lib/api/json-client";
+import { useToast } from "@/components/feedback/toast";
 
 export function LogoutButton() {
   const router = useRouter();
+  const { toast } = useToast();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -19,7 +21,9 @@ export function LogoutButton() {
       router.replace("/login");
       router.refresh();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Sign-out failed.");
+      const message = reason instanceof Error ? reason.message : "Sign-out failed.";
+      setError(message);
+      toast({ tone: "error", title: "Sign-out failed", message });
       setBusy(false);
     }
   }

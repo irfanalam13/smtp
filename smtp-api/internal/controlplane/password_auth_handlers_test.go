@@ -1,12 +1,35 @@
 package controlplane
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestSignupRequestAcceptsLegacyFieldNames(t *testing.T) {
+	var request signUpRequest
+	if err := json.Unmarshal([]byte(`{
+		"firstName":"Ada",
+		"lastName":"Lovelace",
+		"email":"ada@example.test",
+		"password":"Secure-password1!",
+		"confirmPassword":"Secure-password1!",
+		"termsAccepted":true,
+		"organizationName":"Example Org"
+	}`), &request); err != nil {
+		t.Fatal(err)
+	}
+
+	request.normalizeLegacyFields()
+	if request.FirstName != "Ada" || request.LastName != "Lovelace" ||
+		request.ConfirmPassword != "Secure-password1!" ||
+		!request.TermsAccepted || request.OrganizationName != "Example Org" {
+		t.Fatalf("normalized signup request = %#v", request)
+	}
+}
 
 func TestNormalizeEmailAndPasswordPolicy(t *testing.T) {
 	email, ok := normalizeEmail("Example.User@example.test")
@@ -21,8 +44,10 @@ func TestNormalizeEmailAndPasswordPolicy(t *testing.T) {
 			t.Errorf("normalizeEmail accepted %q", invalid)
 		}
 	}
-	if !validPassword("a sufficiently long password") ||
-		validPassword("short") || validPassword("a\npassword with newline") {
+	if !validPassword("Strong-password1!") ||
+		validPassword("1234567") ||
+		validPassword("12345678") ||
+		validPassword("a\npassword with newline") {
 		t.Fatal("password policy accepted an invalid password or rejected a valid one")
 	}
 }

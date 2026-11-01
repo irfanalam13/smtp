@@ -25,11 +25,15 @@ fn test_database_url() -> String {
 async fn clean(queue: &Queue) {
     sqlx::query(
         "TRUNCATE mail_attempts, mail_recipient_attempts, mail_delivery_domain_leases,
-         mail_recipient_deliveries, mail_idempotency, mail_queue, mail_recipients, mail_messages",
+         mail_recipient_deliveries, mail_idempotency, mail_queue, mail_recipients, mail_messages CASCADE",
     )
     .execute(queue.pool())
     .await
     .expect("clean isolated database");
+    sqlx::query("DELETE FROM tenants WHERE name = 'Test Tenant'")
+        .execute(queue.pool())
+        .await
+        .expect("clean test tenant");
 }
 
 #[tokio::test]
@@ -61,6 +65,20 @@ async fn canonical_message_reaches_smtp_and_persists_remote_acceptance() {
         .await
         .expect("enqueue canonical message");
     let message_id = enqueued.message_id;
+    let tenant_id = uuid::Uuid::new_v4();
+    sqlx::query("INSERT INTO tenants (id, name, status, created_at, updated_at) VALUES ($1, 'Test Tenant', 'active', NOW(), NOW())")
+        .bind(tenant_id)
+        .execute(queue.pool())
+        .await
+        .expect("create test tenant");
+    sqlx::query(
+        "UPDATE mail_messages SET tenant_id = $1, sender_domain = 'example.test', delivery_mode = 'direct_mx', dkim_key_ref = 'secret-manager://dkim/example.test' WHERE id = $2",
+    )
+    .bind(tenant_id)
+    .bind(message_id)
+    .execute(queue.pool())
+    .await
+    .expect("update delivery metadata");
 
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
@@ -173,6 +191,20 @@ async fn canonical_message_reaches_mailpit_and_persists_remote_acceptance() {
         .await
         .expect("enqueue canonical message");
     let message_id = enqueued.message_id;
+    let tenant_id = uuid::Uuid::new_v4();
+    sqlx::query("INSERT INTO tenants (id, name, status, created_at, updated_at) VALUES ($1, 'Test Tenant', 'active', NOW(), NOW())")
+        .bind(tenant_id)
+        .execute(queue.pool())
+        .await
+        .expect("create test tenant");
+    sqlx::query(
+        "UPDATE mail_messages SET tenant_id = $1, sender_domain = 'example.test', delivery_mode = 'mailpit', dkim_key_ref = 'secret-manager://dkim/example.test' WHERE id = $2",
+    )
+    .bind(tenant_id)
+    .bind(message_id)
+    .execute(queue.pool())
+    .await
+    .expect("update delivery metadata");
 
     let processor = Arc::new(SmtpProcessor {
         config: DeliveryConfig {

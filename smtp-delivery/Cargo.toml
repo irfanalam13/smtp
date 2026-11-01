@@ -3,6 +3,7 @@ name = "mail-delivery"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+default-run = "mail-delivery"
 
 [dependencies]
 async-trait = "0.1.89"

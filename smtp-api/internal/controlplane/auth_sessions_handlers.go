@@ -145,7 +145,9 @@ func (h Handler) issueBrowserSession(
 
 func (h Handler) authProviders(w http.ResponseWriter, _ *http.Request) {
 	JSON(w, http.StatusOK, map[string]any{
-		"oidc_enabled":           h.AuthSessions.valid() && h.OIDCLogin != nil,
+		"oidc_enabled":           h.AuthSessions.valid() && (h.OIDCLogin != nil || h.DevMode),
+		"google_enabled":         h.AuthSessions.valid() && (h.SocialOAuth.GoogleClientID != "" || h.DevMode || !h.AuthSessions.SecureCookies),
+		"github_enabled":         h.AuthSessions.valid() && (h.SocialOAuth.GitHubClientID != "" || h.DevMode || !h.AuthSessions.SecureCookies),
 		"password_login_enabled": h.AuthSessions.valid() && h.Postgres != nil,
 		"signup_enabled":         h.AuthSessions.valid() && h.Postgres != nil && h.AuthMailer != nil,
 		"password_reset_enabled": h.AuthSessions.valid() && h.Postgres != nil && h.AuthMailer != nil,
@@ -222,8 +224,8 @@ func (h Handler) completeOIDCLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tenantID := cookieValue(tenantCookie)
-	principal, err := h.Postgres.AuthenticateOIDCSubject(
-		r.Context(), identity.Issuer, identity.Subject, tenantID,
+	principal, err := h.Postgres.AuthenticateOrProvisionOIDCSubject(
+		r.Context(), identity.Issuer, identity.Subject, "", "", tenantID,
 	)
 	if err != nil {
 		if errors.Is(err, ErrTenantSelectionRequired) {
@@ -368,6 +370,23 @@ func (h Handler) logout(w http.ResponseWriter, r *http.Request) {
 	h.revokeCurrentSession(w, r)
 }
 
+func (h Handler) refreshAuthSession(w http.ResponseWriter, r *http.Request) {
+	if h.Postgres == nil || !h.AuthSessions.valid() {
+		Error(w, http.StatusServiceUnavailable, "auth_unavailable", "browser sessions are not configured")
+		return
+	}
+	principal, ok := h.principal(w, r, "")
+	if !ok || !isBrowserSessionPrincipal(principal) {
+		return
+	}
+	session, err := h.issueBrowserSession(w, r, principal)
+	if err != nil {
+		h.databaseError(w, "refresh browser session", err)
+		return
+	}
+	JSON(w, http.StatusOK, map[string]any{"status": "refreshed", "session": session})
+}
+
 func (h Handler) logoutAll(w http.ResponseWriter, r *http.Request) {
 	if h.Postgres == nil {
 		Error(w, http.StatusServiceUnavailable, "auth_unavailable", "session storage is not configured")
@@ -432,7 +451,20 @@ func (h Handler) sameOriginRequest(r *http.Request) bool {
 		}
 		origin = parsed.Scheme + "://" + parsed.Host
 	}
-	return origin == h.AuthSessions.PublicOrigin
+	if origin == h.AuthSessions.PublicOrigin {
+		return true
+	}
+	// In development environments, allow loopback origins (localhost or 127.0.0.1 on any port)
+	if h.DevMode || !h.AuthSessions.SecureCookies {
+		parsedOrigin, err := url.Parse(origin)
+		if err == nil {
+			host := parsedOrigin.Hostname()
+			if strings.EqualFold(host, "localhost") || host == "127.0.0.1" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (h Handler) setSessionCookies(w http.ResponseWriter, token, csrf string, expiresAt time.Time) {

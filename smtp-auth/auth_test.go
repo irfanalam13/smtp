@@ -48,11 +48,23 @@ func TestPasswordHashVerification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if ok, err := VerifyPassword(encoded, password); err != nil || !ok {
 		t.Fatalf("VerifyPassword(valid) = (%t, %v)", ok, err)
 	}
 	if ok, err := VerifyPassword(encoded, "a different password"); err != nil || ok {
 		t.Fatalf("VerifyPassword(wrong) = (%t, %v)", ok, err)
+	}
+}
+
+func TestValidatePasswordPolicy(t *testing.T) {
+	for _, password := range []string{"password", "12345678", "lowercase1!", "Uppercase1"} {
+		if err := ValidatePassword(password, DefaultPasswordPolicy); err == nil {
+			t.Errorf("ValidatePassword accepted weak password %q", password)
+		}
+	}
+	if err := ValidatePassword("Secure-password1!", DefaultPasswordPolicy); err != nil {
+		t.Fatalf("ValidatePassword rejected strong password: %v", err)
 	}
 }
 

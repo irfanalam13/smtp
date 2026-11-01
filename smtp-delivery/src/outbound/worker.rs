@@ -45,7 +45,10 @@ impl<R: Resolver + 'static> DeliveryWorker<R> {
                 } else {
                     "direct_mx"
                 };
-                let batch = self.queue.claim_delivery_batch_for_mode(&self.owner, delivery_mode).await?;
+                let batch = self
+                    .queue
+                    .claim_delivery_batch_for_mode(&self.owner, delivery_mode)
+                    .await?;
                 let Some(batch) = batch else {
                     break;
                 };

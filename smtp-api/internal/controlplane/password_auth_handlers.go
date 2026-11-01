@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"example.com/smtp-platform/smtp-api/internal/authmail"
@@ -23,9 +22,21 @@ const (
 )
 
 type signUpRequest struct {
-	Email            string `json:"email"`
-	Password         string `json:"password"`
-	OrganizationName string `json:"organization_name"`
+	FirstName             string `json:"first_name"`
+	LastName              string `json:"last_name"`
+	Email                 string `json:"email"`
+	Password              string `json:"password"`
+	ConfirmPassword       string `json:"confirm_password"`
+	TermsAccepted         bool   `json:"terms_accepted"`
+	PhoneNumber           string `json:"phone_number"`
+	Country               string `json:"country"`
+	OrganizationName      string `json:"organization_name"`
+	FirstNameLegacy       string `json:"firstName"`
+	LastNameLegacy        string `json:"lastName"`
+	ConfirmPasswordLegacy string `json:"confirmPassword"`
+	TermsAcceptedLegacy   *bool  `json:"termsAccepted"`
+	PhoneNumberLegacy     string `json:"phoneNumber"`
+	OrganizationLegacy    string `json:"organizationName"`
 }
 
 type passwordLoginRequest struct {
@@ -47,6 +58,11 @@ type resetPasswordRequest struct {
 	NewPassword string `json:"new_password"`
 }
 
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
 func (h Handler) signUp(w http.ResponseWriter, r *http.Request) {
 	if !h.AuthSessions.valid() || h.Postgres == nil || h.AuthMailer == nil {
 		Error(w, http.StatusServiceUnavailable, "auth_unavailable", "account registration is not configured")
@@ -56,8 +72,15 @@ func (h Handler) signUp(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusForbidden, "forbidden", "request origin is not allowed")
 		return
 	}
-	if !h.Store.Allow("auth-signup:"+requestClientIP(r), 3, time.Hour) {
-		w.Header().Set("Retry-After", "3600")
+	limit, window, retryAfter := 3, time.Hour, "3600"
+	// A developer commonly corrects a form mistake and retries. Keep the
+	// production anti-abuse limit, but avoid locking local development for an
+	// hour after three attempts.
+	if h.DevMode {
+		limit, window, retryAfter = 30, time.Minute, "60"
+	}
+	if !h.Store.Allow("auth-signup:"+requestClientIP(r), limit, window) {
+		w.Header().Set("Retry-After", retryAfter)
 		Error(w, http.StatusTooManyRequests, "rate_limited", "too many account registration attempts")
 		return
 	}
@@ -67,12 +90,45 @@ func (h Handler) signUp(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
+	request.normalizeLegacyFields()
 	email, ok := normalizeEmail(request.Email)
-	if !ok || !validPassword(request.Password) ||
-		!validOrganizationName(request.OrganizationName) {
-		Error(w, http.StatusBadRequest, "invalid_request", "email, password, or organization name is invalid")
+	if !ok {
+		Error(w, http.StatusBadRequest, "invalid_email", "enter a valid email address")
 		return
 	}
+	if !validName(request.FirstName, 2, 50) {
+		Error(w, http.StatusBadRequest, "invalid_first_name", "first name must be 2 to 50 characters")
+		return
+	}
+	if !validName(request.LastName, 2, 50) {
+		Error(w, http.StatusBadRequest, "invalid_last_name", "last name must be 2 to 50 characters")
+		return
+	}
+	if err := smtpAuth.ValidatePassword(request.Password, smtpAuth.DefaultPasswordPolicy); err != nil {
+		Error(w, http.StatusBadRequest, "invalid_password", "password must be at least 8 characters and include uppercase, lowercase, number, and special character")
+		return
+	}
+	if request.Password != request.ConfirmPassword {
+		Error(w, http.StatusBadRequest, "password_mismatch", "passwords do not match")
+		return
+	}
+	if !request.TermsAccepted {
+		Error(w, http.StatusBadRequest, "terms_required", "accept the terms and conditions to continue")
+		return
+	}
+	if !validOptionalField(request.PhoneNumber, 7, 32) {
+		Error(w, http.StatusBadRequest, "invalid_phone_number", "phone number must be 7 to 32 characters")
+		return
+	}
+	if !validOptionalField(request.Country, 2, 100) {
+		Error(w, http.StatusBadRequest, "invalid_country", "country must be 2 to 100 characters")
+		return
+	}
+	if !validOrganizationName(request.OrganizationName) {
+		Error(w, http.StatusBadRequest, "invalid_organization_name", "organization name must be at most 160 characters")
+		return
+	}
+
 	passwordHash, err := smtpAuth.HashPasswordBounded(request.Password)
 	if errors.Is(err, smtpAuth.ErrPasswordCapacity) {
 		w.Header().Set("Retry-After", "10")
@@ -88,8 +144,13 @@ func (h Handler) signUp(w http.ResponseWriter, r *http.Request) {
 		h.databaseError(w, "create email verification token", err)
 		return
 	}
-	registered, err := h.Postgres.RegisterPasswordAccount(
-		r.Context(), email, passwordHash, strings.TrimSpace(request.OrganizationName),
+	organizationName := strings.TrimSpace(request.OrganizationName)
+	if organizationName == "" {
+		organizationName = strings.TrimSpace(request.FirstName + " " + request.LastName)
+	}
+	registered, err := h.Postgres.RegisterPasswordAccountWithProfile(
+		r.Context(), request.FirstName, request.LastName, request.PhoneNumber,
+		request.Country, email, passwordHash, organizationName,
 		tokenHash, time.Now().Add(emailVerificationTokenLifetime),
 	)
 	if errors.Is(err, ErrConflict) {
@@ -104,17 +165,47 @@ func (h Handler) signUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	verifyURL := h.AuthSessions.PublicOrigin + "/verify-email?token=" + url.QueryEscape(token)
-	if err := h.sendAccountEmail(r, email, "Verify your SMTP Platform account",
-		fmt.Sprintf("Verify your email address to activate the account for %s:\n\n%s\n\nThis link expires in 24 hours.", strings.TrimSpace(request.OrganizationName), verifyURL)); err != nil {
-		slog.Error("account verification email delivery failed", "operation", "account.signup")
-		Error(w, http.StatusServiceUnavailable, "email_unavailable", "account created, but the verification message could not be sent; use resend verification after email delivery is restored")
+	_ = h.sendAccountEmail(r, email, "Verify your SMTP Platform account",
+		fmt.Sprintf("Verify your email address to activate the account for %s:\n\n%s\n\nThis link expires in 24 hours.", strings.TrimSpace(request.OrganizationName), verifyURL))
+
+	if h.DevMode {
+		_ = h.Postgres.AutoVerifyUser(r.Context(), registered.UserID)
+		JSON(w, http.StatusAccepted, map[string]string{
+			"status":           "verified",
+			"message":          "Account created and verified. You can now sign in with your password.",
+			"tenant_id":        registered.TenantID,
+			"verification_url": verifyURL,
+		})
 		return
 	}
+
 	JSON(w, http.StatusAccepted, map[string]string{
-		"status":    "verification_pending",
-		"message":   "Check your email for a verification link before signing in.",
-		"tenant_id": registered.TenantID,
+		"status":           "verification_pending",
+		"message":          "Check your email for a verification link before signing in.",
+		"tenant_id":        registered.TenantID,
+		"verification_url": verifyURL,
 	})
+}
+
+func (request *signUpRequest) normalizeLegacyFields() {
+	if request.FirstName == "" {
+		request.FirstName = request.FirstNameLegacy
+	}
+	if request.LastName == "" {
+		request.LastName = request.LastNameLegacy
+	}
+	if request.ConfirmPassword == "" {
+		request.ConfirmPassword = request.ConfirmPasswordLegacy
+	}
+	if !request.TermsAccepted && request.TermsAcceptedLegacy != nil {
+		request.TermsAccepted = *request.TermsAcceptedLegacy
+	}
+	if request.PhoneNumber == "" {
+		request.PhoneNumber = request.PhoneNumberLegacy
+	}
+	if request.OrganizationName == "" {
+		request.OrganizationName = request.OrganizationLegacy
+	}
 }
 
 func (h Handler) passwordLogin(w http.ResponseWriter, r *http.Request) {
@@ -199,10 +290,21 @@ func (h Handler) passwordLogin(w http.ResponseWriter, r *http.Request) {
 		h.databaseError(w, "create password browser session", err)
 		return
 	}
-	JSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"status": "authenticated", "user_id": principal.UserID,
 		"tenant_id": principal.TenantID, "expires_at": session.ExpiresAt,
-	})
+	}
+	if h.JWT.valid() {
+		token, expiresAt, tokenErr := h.JWT.Issue(principal)
+		if tokenErr != nil {
+			h.databaseError(w, "issue access token", tokenErr)
+			return
+		}
+		response["access_token"] = token
+		response["token_type"] = "Bearer"
+		response["access_token_expires_at"] = expiresAt
+	}
+	JSON(w, http.StatusOK, response)
 }
 
 func (h Handler) verifyEmail(w http.ResponseWriter, r *http.Request) {
@@ -347,6 +449,55 @@ func (h Handler) resetPassword(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusOK, map[string]string{"status": "password_reset"})
 }
 
+func (h Handler) changePassword(w http.ResponseWriter, r *http.Request) {
+	if h.Postgres == nil {
+		Error(w, http.StatusServiceUnavailable, "auth_unavailable", "password changes are not configured")
+		return
+	}
+	principal, ok := h.principal(w, r, "")
+	if !ok || !isBrowserSessionPrincipal(principal) {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	var request changePasswordRequest
+	if err := decodeJSON(r, &request); err != nil ||
+		request.CurrentPassword == "" ||
+		smtpAuth.ValidatePassword(request.NewPassword, smtpAuth.DefaultPasswordPolicy) != nil {
+		Error(w, http.StatusBadRequest, "invalid_request", "current or new password is invalid")
+		return
+	}
+	currentHash, err := h.Postgres.PasswordHashForUser(r.Context(), principal.UserID)
+	if err != nil {
+		h.databaseError(w, "load current password", err)
+		return
+	}
+	matches, err := smtpAuth.VerifyPasswordBounded(currentHash, request.CurrentPassword)
+	if err != nil {
+		h.databaseError(w, "verify current password", err)
+		return
+	}
+	if !matches {
+		Error(w, http.StatusUnauthorized, "unauthorized", "current password is incorrect")
+		return
+	}
+	newHash, err := smtpAuth.HashPasswordBounded(request.NewPassword)
+	if errors.Is(err, smtpAuth.ErrPasswordCapacity) {
+		w.Header().Set("Retry-After", "10")
+		Error(w, http.StatusTooManyRequests, "rate_limited", "password service is temporarily busy")
+		return
+	}
+	if err != nil {
+		h.databaseError(w, "hash new password", err)
+		return
+	}
+	if err := h.Postgres.UpdatePasswordHash(r.Context(), principal.UserID, newHash); err != nil {
+		h.databaseError(w, "update account password", err)
+		return
+	}
+	h.clearSessionCookies(w)
+	JSON(w, http.StatusOK, map[string]string{"status": "password_changed"})
+}
+
 func (h Handler) sendAccountEmail(r *http.Request, recipient, subject, body string) error {
 	if h.AuthMailer == nil {
 		return errors.New("authentication email sender is not configured")
@@ -400,21 +551,25 @@ func normalizeEmail(value string) (string, bool) {
 }
 
 func validPassword(value string) bool {
-	if !utf8.ValidString(value) || len(value) < 12 || len(value) > 1024 {
-		return false
-	}
-	for _, char := range value {
-		if unicode.IsControl(char) {
-			return false
-		}
-	}
-	return true
+	return smtpAuth.ValidatePassword(value, smtpAuth.DefaultPasswordPolicy) == nil
 }
 
 func validOrganizationName(value string) bool {
 	value = strings.TrimSpace(value)
-	return utf8.ValidString(value) && len(value) >= 1 && len(value) <= 160 &&
-		!strings.ContainsRune(value, '\x00')
+	return value == "" || (utf8.ValidString(value) && len(value) <= 160 &&
+		!strings.ContainsRune(value, '\x00'))
+}
+
+func validName(value string, min, max int) bool {
+	return utf8.ValidString(value) && strings.TrimSpace(value) == value &&
+		len([]rune(value)) >= min && len([]rune(value)) <= max &&
+		!strings.ContainsRune(value, '\x00') && !strings.ContainsAny(value, "\r\n")
+}
+
+func validOptionalField(value string, min, max int) bool {
+	value = strings.TrimSpace(value)
+	return value == "" || (utf8.ValidString(value) && len([]rune(value)) >= min &&
+		len([]rune(value)) <= max && !strings.ContainsAny(value, "\r\n\x00"))
 }
 
 func validOpaqueToken(value string) bool {

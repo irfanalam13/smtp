@@ -5,12 +5,14 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import type { ReactNode } from "react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PasswordLogin } from "../../src/features/auth/components/password-login";
 import { LogoutButton } from "../../src/features/auth/components/logout-button";
 import { ResetPasswordForm } from "../../src/features/auth/components/reset-password-form";
 import { SignupForm } from "../../src/features/auth/components/signup-form";
+import { ToastProvider } from "../../src/components/feedback/toast";
 
 const { replace, refresh } = vi.hoisted(() => ({
   replace: vi.fn(),
@@ -20,6 +22,10 @@ const { replace, refresh } = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace, refresh, push: vi.fn() }),
 }));
+
+function renderWithToast(ui: ReactNode) {
+  return render(<ToastProvider>{ui}</ToastProvider>);
+}
 
 afterEach(() => {
   cleanup();
@@ -49,7 +55,7 @@ describe("password authentication forms", () => {
         })),
       );
     vi.stubGlobal("fetch", fetchMock);
-    render(<PasswordLogin />);
+    renderWithToast(<PasswordLogin />);
 
     fireEvent.change(await screen.findByLabelText("Email address"), {
       target: { value: "owner@example.test" },
@@ -90,8 +96,14 @@ describe("password authentication forms", () => {
         })),
       );
     vi.stubGlobal("fetch", fetchMock);
-    render(<SignupForm />);
+    renderWithToast(<SignupForm />);
 
+    fireEvent.change(await screen.findByLabelText("First name"), {
+      target: { value: "Ada" },
+    });
+    fireEvent.change(screen.getByLabelText("Last name"), {
+      target: { value: "Lovelace" },
+    });
     fireEvent.change(await screen.findByLabelText("Work email"), {
       target: { value: "owner@example.test" },
     });
@@ -99,8 +111,12 @@ describe("password authentication forms", () => {
       target: { value: "Example Org" },
     });
     fireEvent.change(screen.getByLabelText(/^Password/), {
-      target: { value: "a secure password" },
+      target: { value: "A secure password1!" },
     });
+    fireEvent.change(screen.getByLabelText("Confirm password"), {
+      target: { value: "A secure password1!" },
+    });
+    fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: "Create account" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(
@@ -112,8 +128,12 @@ describe("password authentication forms", () => {
     const [url, init] = fetchMock.mock.calls[1];
     expect(url).toBe("/api/backend/v1/auth/signup");
     expect(JSON.parse(String(init?.body))).toEqual({
+      first_name: "Ada",
+      last_name: "Lovelace",
       email: "owner@example.test",
-      password: "a secure password",
+      password: "A secure password1!",
+      confirm_password: "A secure password1!",
+      terms_accepted: true,
       organization_name: "Example Org",
     });
   });
@@ -124,7 +144,7 @@ describe("password authentication forms", () => {
       new Response(JSON.stringify({ status: "logged_out" })),
     );
     vi.stubGlobal("fetch", fetchMock);
-    render(<LogoutButton />);
+    renderWithToast(<LogoutButton />);
 
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
@@ -148,7 +168,7 @@ describe("password authentication forms", () => {
         new Response(JSON.stringify({ status: "password_reset" })),
       );
     vi.stubGlobal("fetch", fetchMock);
-    render(<ResetPasswordForm token="single-use-reset-token" />);
+    renderWithToast(<ResetPasswordForm token="single-use-reset-token" />);
 
     fireEvent.change(await screen.findByLabelText("New password"), {
       target: { value: "a secure password" },

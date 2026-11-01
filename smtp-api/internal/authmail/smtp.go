@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/mail"
 	"net/smtp"
@@ -24,6 +25,14 @@ type Message struct {
 
 type Sender interface {
 	Send(context.Context, Message) error
+}
+
+// DevLogger implements Sender by logging outgoing auth emails to stdout/stderr.
+type DevLogger struct{}
+
+func (d *DevLogger) Send(_ context.Context, msg Message) error {
+	slog.Info("AUTH EMAIL (DEV LOGGER)", "to", msg.To, "subject", msg.Subject, "body", msg.Body)
+	return nil
 }
 
 type SMTPConfig struct {

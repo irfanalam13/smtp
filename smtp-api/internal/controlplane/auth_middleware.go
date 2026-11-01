@@ -34,6 +34,21 @@ func (h Handler) principal(w http.ResponseWriter, r *http.Request, scope string)
 			} else {
 				p, err = h.Store.Auth(r, h.DevMode)
 			}
+		} else if h.JWT.valid() {
+			p, err = h.JWT.Verify(token)
+			// Keep accepting configured third-party OIDC JWTs; local tokens are
+			// distinguished by their signature and issuer rather than a token prefix.
+			if err != nil && h.OIDC != nil && h.Postgres != nil {
+				var claims identity.Claims
+				claims, err = h.OIDC.Verify(r.Context(), token)
+				if err == nil {
+					p, err = h.Postgres.AuthenticateOIDCSubject(
+						r.Context(), claims.Issuer, claims.Subject, r.Header.Get("X-Tenant-ID"),
+					)
+				} else {
+					err = ErrUnauthorized
+				}
+			}
 		} else if h.OIDC != nil && h.Postgres != nil {
 			var claims identity.Claims
 			claims, err = h.OIDC.Verify(r.Context(), token)

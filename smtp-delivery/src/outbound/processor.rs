@@ -38,7 +38,9 @@ impl<R: Resolver> SmtpProcessor<R> {
             "direct_mx"
         };
         let dkim_reference_matches = match batch.sender_domain.as_deref() {
-            Some(domain) => batch.dkim_key_ref.as_deref() == Some(&format!("secret-manager://dkim/{domain}")),
+            Some(domain) => {
+                batch.dkim_key_ref.as_deref() == Some(&format!("secret-manager://dkim/{domain}"))
+            }
             None => false,
         };
         let sender_domain_matches = batch.sender_domain.as_deref()
@@ -50,9 +52,7 @@ impl<R: Resolver> SmtpProcessor<R> {
         let invalid_reason = if batch.delivery_mode != expected_mode {
             Some("queued delivery mode does not match this worker configuration".to_owned())
         } else if batch.delivery_mode == "direct_mx"
-            && (batch.tenant_id.is_none()
-                || !sender_domain_matches
-                || !dkim_reference_matches)
+            && (batch.tenant_id.is_none() || !sender_domain_matches || !dkim_reference_matches)
         {
             Some("tenant sender or DKIM key reference is invalid".to_owned())
         } else if batch.schema_version != CANONICAL_MESSAGE_SCHEMA_VERSION {

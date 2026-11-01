@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import { useToast } from "@/components/feedback/toast";
 import {
   getAuthCapabilities,
   resetPassword,
@@ -11,6 +12,7 @@ import {
 
 export function ResetPasswordForm({ token }: { token: string }) {
   const router = useRouter();
+  const { toast } = useToast();
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -29,11 +31,13 @@ export function ResetPasswordForm({ token }: { token: string }) {
       .catch(() => {
         if (!controller.signal.aborted) {
           setEnabled(false);
-          setError("Password recovery configuration could not be loaded.");
+          const message = "Password recovery configuration could not be loaded.";
+          setError(message);
+          toast({ tone: "error", title: "Recovery unavailable", message });
         }
       });
     return () => controller.abort();
-  }, []);
+  }, [toast]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -50,9 +54,16 @@ export function ResetPasswordForm({ token }: { token: string }) {
     try {
       await resetPassword(token, password);
       setComplete(true);
+      toast({
+        tone: "success",
+        title: "Password updated",
+        message: "Your password has been changed and existing sessions were signed out.",
+      });
       router.replace("/reset-password");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Password reset failed.");
+      const message = reason instanceof Error ? reason.message : "Password reset failed.";
+      setError(message);
+      toast({ tone: "error", title: "Password reset failed", message });
     } finally {
       setBusy(false);
     }
@@ -84,7 +95,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
               autoComplete="new-password"
               className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
               maxLength={1024}
-              minLength={12}
+              minLength={8}
               onChange={(event) => setPassword(event.target.value)}
               required
               type="password"
@@ -97,7 +108,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
               autoComplete="new-password"
               className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
               maxLength={1024}
-              minLength={12}
+              minLength={8}
               onChange={(event) => setConfirmation(event.target.value)}
               required
               type="password"

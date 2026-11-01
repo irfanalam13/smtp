@@ -29,6 +29,55 @@ type RegisteredAccount struct {
 	TenantID string `json:"tenant_id"`
 }
 
+func (repository *PostgreSQLRepository) PasswordHashForUser(ctx context.Context, userID string) (string, error) {
+	if !validUUID(userID) {
+		return "", ErrUnauthorized
+	}
+	var passwordHash string
+	err := repository.pool.QueryRow(ctx, `
+		SELECT password_hash FROM users
+		WHERE id = $1 AND status = 'active' AND password_hash IS NOT NULL
+	`, userID).Scan(&passwordHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrUnauthorized
+	}
+	if err != nil {
+		return "", fmt.Errorf("load account password: %w", err)
+	}
+	return passwordHash, nil
+}
+
+func (repository *PostgreSQLRepository) UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error {
+	if !validUUID(userID) || passwordHash == "" || len(passwordHash) > 512 {
+		return ErrInvalid
+	}
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin password update: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx, `
+		UPDATE users SET password_hash = $2, updated_at = NOW()
+		WHERE id = $1 AND status = 'active' AND password_hash IS NOT NULL
+	`, userID, passwordHash)
+	if err != nil {
+		return fmt.Errorf("update account password: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrUnauthorized
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE auth_sessions SET revoked_at = NOW()
+		WHERE user_id = $1 AND revoked_at IS NULL
+	`, userID); err != nil {
+		return fmt.Errorf("revoke sessions after password update: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit password update: %w", err)
+	}
+	return nil
+}
+
 func (repository *PostgreSQLRepository) RegisterPasswordAccount(
 	ctx context.Context,
 	email string,
@@ -37,7 +86,27 @@ func (repository *PostgreSQLRepository) RegisterPasswordAccount(
 	tokenHash [sha256.Size]byte,
 	tokenExpiresAt time.Time,
 ) (RegisteredAccount, error) {
+	return repository.RegisterPasswordAccountWithProfile(
+		ctx, "User", "Account", "", "", email, passwordHash,
+		organizationName, tokenHash, tokenExpiresAt,
+	)
+}
+
+func (repository *PostgreSQLRepository) RegisterPasswordAccountWithProfile(
+	ctx context.Context,
+	firstName string,
+	lastName string,
+	phoneNumber string,
+	country string,
+	email string,
+	passwordHash string,
+	organizationName string,
+	tokenHash [sha256.Size]byte,
+	tokenExpiresAt time.Time,
+) (RegisteredAccount, error) {
 	if !validEmail(email) || passwordHash == "" || len(passwordHash) > 512 ||
+		!validName(firstName, 2, 50) || !validName(lastName, 2, 50) ||
+		!validOptionalField(phoneNumber, 7, 32) || !validOptionalField(country, 2, 100) ||
 		strings.TrimSpace(organizationName) == "" || len(organizationName) > 160 ||
 		!tokenExpiresAt.After(time.Now()) {
 		return RegisteredAccount{}, ErrInvalid
@@ -57,11 +126,16 @@ func (repository *PostgreSQLRepository) RegisterPasswordAccount(
 		return RegisteredAccount{}, fmt.Errorf("create account organization: %w", err)
 	}
 	err = tx.QueryRow(ctx, `
-		INSERT INTO users (id, external_subject, identity_issuer, email, password_hash)
-		SELECT generated.id, 'password:' || generated.id::text, 'smtp-password', $1, $2
+		INSERT INTO users (
+			id, external_subject, identity_issuer, first_name, last_name,
+			phone_number, country, organization_name, email, password_hash
+		)
+		SELECT generated.id, 'password:' || generated.id::text, 'smtp-password',
+		       $1, $2, NULLIF($3, ''), NULLIF($4, ''), $5, $6, $7
 		FROM (SELECT gen_random_uuid() AS id) AS generated
 		RETURNING id::text
-	`, email, passwordHash).Scan(&account.UserID)
+	`, firstName, lastName, strings.TrimSpace(phoneNumber), strings.TrimSpace(country),
+		organizationName, email, passwordHash).Scan(&account.UserID)
 	if err != nil {
 		var postgresError *pgconn.PgError
 		if errors.As(err, &postgresError) && postgresError.Code == "23505" {
@@ -80,8 +154,8 @@ func (repository *PostgreSQLRepository) RegisterPasswordAccount(
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO audit_events (tenant_id, actor_user_id, action, target_type, target_id)
-		VALUES ($1, $2, 'account.signup', 'user', $2)
-	`, account.TenantID, account.UserID); err != nil {
+		VALUES ($1, $2, 'account.signup', 'user', $3)
+	`, account.TenantID, account.UserID, account.UserID); err != nil {
 		return RegisteredAccount{}, fmt.Errorf("record account signup: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -271,12 +345,12 @@ func (repository *PostgreSQLRepository) ConsumePasswordEmailToken(
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO audit_events (tenant_id, actor_user_id, action, target_type, target_id)
-		SELECT membership.tenant_id, $1, $2, 'user', $1
+		SELECT membership.tenant_id, $1, $2, 'user', $3
 		FROM tenant_memberships AS membership
 		WHERE membership.user_id = $1
 		ORDER BY membership.tenant_id
 		LIMIT 1
-	`, userID, action); err != nil {
+	`, userID, action, userID); err != nil {
 		return false, fmt.Errorf("record account security event: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

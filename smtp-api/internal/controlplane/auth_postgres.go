@@ -186,6 +186,115 @@ func (repository *PostgreSQLRepository) AuthenticateOIDCSubject(
 	}, nil
 }
 
+func (repository *PostgreSQLRepository) AutoVerifyUser(ctx context.Context, userID string) error {
+	_, err := repository.pool.Exec(ctx, `
+		UPDATE users
+		SET email_verified_at = COALESCE(email_verified_at, NOW()), updated_at = NOW()
+		WHERE id = $1 AND status = 'active'
+	`, userID)
+	return err
+}
+
+func (repository *PostgreSQLRepository) AuthenticateOrProvisionOIDCSubject(
+	ctx context.Context,
+	issuer string,
+	subject string,
+	email string,
+	name string,
+	tenantID string,
+) (Principal, error) {
+	principal, err := repository.AuthenticateOIDCSubject(ctx, issuer, subject, tenantID)
+	if err == nil {
+		return principal, nil
+	}
+	if !errors.Is(err, ErrUnauthorized) {
+		return Principal{}, err
+	}
+
+	orgName := strings.TrimSpace(name)
+	if orgName == "" {
+		if email != "" {
+			parts := strings.Split(email, "@")
+			orgName = parts[0] + "'s Organization"
+		} else {
+			orgName = "Personal Workspace"
+		}
+	} else {
+		orgName = orgName + "'s Workspace"
+	}
+	if len(orgName) > 160 {
+		orgName = orgName[:160]
+	}
+
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return Principal{}, fmt.Errorf("begin oidc auto-provision tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var newTenantID string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO tenants (id, name, status)
+		VALUES (gen_random_uuid(), $1, 'active')
+		RETURNING id::text
+	`, orgName).Scan(&newTenantID); err != nil {
+		return Principal{}, fmt.Errorf("create oidc auto-provision tenant: %w", err)
+	}
+
+	var newUserID string
+	cleanEmail := strings.ToLower(strings.TrimSpace(email))
+	if cleanEmail != "" && validEmail(cleanEmail) {
+		var existingUserID string
+		err = tx.QueryRow(ctx, `
+			SELECT id::text FROM users WHERE email = $1 LIMIT 1
+		`, cleanEmail).Scan(&existingUserID)
+		if err == nil && existingUserID != "" {
+			newUserID = existingUserID
+			_, _ = tx.Exec(ctx, `
+				UPDATE users SET external_subject = $1, identity_issuer = $2, email_verified_at = COALESCE(email_verified_at, NOW()), updated_at = NOW()
+				WHERE id = $3
+			`, subject, issuer, newUserID)
+		} else {
+			err = tx.QueryRow(ctx, `
+				INSERT INTO users (id, external_subject, identity_issuer, email, status, email_verified_at)
+				VALUES (gen_random_uuid(), $1, $2, $3, 'active', NOW())
+				RETURNING id::text
+			`, subject, issuer, cleanEmail).Scan(&newUserID)
+		}
+	} else {
+		err = tx.QueryRow(ctx, `
+			INSERT INTO users (id, external_subject, identity_issuer, status, email_verified_at)
+			VALUES (gen_random_uuid(), $1, $2, 'active', NOW())
+			RETURNING id::text
+		`, subject, issuer).Scan(&newUserID)
+	}
+	if err != nil {
+		return Principal{}, fmt.Errorf("create oidc user: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO tenant_memberships (tenant_id, user_id, role)
+		VALUES ($1, $2, 'owner')
+		ON CONFLICT (tenant_id, user_id) DO NOTHING
+	`, newTenantID, newUserID)
+	if err != nil {
+		return Principal{}, fmt.Errorf("create oidc tenant membership: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Principal{}, fmt.Errorf("commit oidc provision: %w", err)
+	}
+
+	return Principal{
+		Subject:  "oidc:" + subject,
+		TenantID: newTenantID,
+		UserID:   newUserID,
+		Role:     Owner,
+		Scopes:   smtpAuth.PermissionsForRole("owner"),
+		durable:  true,
+	}, nil
+}
+
 func validAPIKey(secret string) bool {
 	if len(secret) < apiKeyPrefixLength+1 ||
 		!strings.HasPrefix(secret, "sp_") ||

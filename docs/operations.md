@@ -8,7 +8,8 @@
 | Go API | `http://127.0.0.1:8080` | `go run ./smtp-api/cmd/api` |
 | Dashboard | `http://127.0.0.1:3000` | `pnpm dev:dashboard` |
 | SMTP ingress | `127.0.0.1:2525` | `cargo run -p smtp-ingress` |
-| Outbound delivery worker | optional; external delivery disabled by default | `cargo run -p mail-delivery` |
+| Outbound delivery worker | optional; external delivery disabled by default | `cargo run -p mail-delivery --bin mail-delivery` |
+| Mailpit | `127.0.0.1:1025` / `http://127.0.0.1:8025` | `mailpit` |
 
 Use `./scripts/run-dev.sh` instead of starting these processes manually.
 
@@ -29,9 +30,12 @@ make dev-down
 ```
 
 The development runner does not start outbound delivery by default. To run
-the real worker, configure `SMTP_DELIVERY_ENABLED=true` and an explicit
-`SMTP_DELIVERY_ALLOWLIST` in `.env`, then start with
-`./scripts/run-dev.sh --worker`. The worker sends real external SMTP.
+the worker with the local Mailpit relay, configure the Mailpit
+`SMTP_RELAY_*` settings in `.env`, then start with
+`./scripts/run-dev.sh --worker`. The runner starts Mailpit, waits for its SMTP
+and Web/API ports, and stops it with the other application processes. For a
+non-Mailpit relay, configure the relay settings or an explicit
+`SMTP_DELIVERY_ALLOWLIST`; the worker sends real external SMTP in that mode.
 
 ## Health and diagnostics
 

@@ -21,7 +21,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 const PASSWORD_HASH_VERSION: i16 = 1;
-const PASSWORD_MIN_BYTES: usize = 12;
+const PASSWORD_MIN_BYTES: usize = 8;
 const PASSWORD_MAX_BYTES: usize = 512;
 const HASH_MEMORY_KIB: u32 = 19_456;
 const HASH_ITERATIONS: u32 = 2;

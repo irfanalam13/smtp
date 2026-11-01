@@ -29,6 +29,8 @@ type Handler struct {
 	AuthMailer        authmail.Sender
 	DummyPasswordHash string
 	AuthSessions      BrowserSessionConfig
+	SocialOAuth       SocialOAuthConfig
+	JWT               JWTConfig
 	DevMode           bool
 	TXT               TXTResolver
 	DNS               DNSResolver
@@ -40,6 +42,8 @@ func (h Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/auth/providers", h.authProviders)
 	mux.HandleFunc("POST /v1/auth/signup", h.signUp)
 	mux.HandleFunc("POST /v1/auth/login", h.passwordLogin)
+	mux.HandleFunc("POST /v1/auth/refresh", h.refreshAuthSession)
+	mux.HandleFunc("POST /v1/auth/change-password", h.changePassword)
 	mux.HandleFunc("POST /v1/auth/email/verify", h.verifyEmail)
 	mux.HandleFunc("POST /v1/auth/email/resend-verification", h.resendVerification)
 	mux.HandleFunc("POST /v1/auth/password/forgot", h.forgotPassword)
@@ -51,6 +55,10 @@ func (h Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /v1/auth/logout-all", h.logoutAll)
 	mux.HandleFunc("GET /v1/auth/oidc/start", h.startOIDCLogin)
 	mux.HandleFunc("GET /v1/auth/oidc/callback", h.completeOIDCLogin)
+	mux.HandleFunc("GET /v1/auth/oauth/google/start", h.startGoogleOAuth)
+	mux.HandleFunc("GET /v1/auth/oauth/google/callback", h.completeGoogleOAuth)
+	mux.HandleFunc("GET /v1/auth/oauth/github/start", h.startGitHubOAuth)
+	mux.HandleFunc("GET /v1/auth/oauth/github/callback", h.completeGitHubOAuth)
 	mux.HandleFunc("GET /v1/me", h.me)
 	mux.HandleFunc("GET /v1/tenants/current", h.tenant)
 	mux.HandleFunc("GET /v1/domains", h.domains)
