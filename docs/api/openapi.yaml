@@ -1455,6 +1455,39 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/webhook-dead-letters:
+    get:
+      summary: List failed webhook deliveries
+      tags: [Control plane]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Tenant-scoped webhook dead letters
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/WebhookDeadLetter" } }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { description: Control-plane storage is temporarily unavailable }
+  /v1/webhook-deliveries/{id}/replay:
+    post:
+      summary: Replay a webhook dead letter
+      tags: [Control plane]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "202": { description: Delivery queued for replay }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Delivery is not currently a dead letter }
+        "503": { description: Control-plane storage is temporarily unavailable }
   /v1/suppressions/{recipient}:
     delete:
       summary: Deactivate a recipient suppression
@@ -1668,6 +1701,18 @@ components:
         active: { type: boolean }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    WebhookDeadLetter:
+      type: object
+      required: [id, subscription_id, event_id, event_type, state, attempt_count, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        subscription_id: { type: string, format: uuid }
+        event_id: { type: string, format: uuid }
+        event_type: { type: string }
+        state: { type: string, enum: [dead_letter] }
+        attempt_count: { type: integer, minimum: 0 }
+        last_error: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
     SubmissionRequest:
       type: object
       additionalProperties: false

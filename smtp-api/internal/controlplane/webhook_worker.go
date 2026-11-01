@@ -14,6 +14,7 @@ import (
 )
 
 const webhookMaxAttempts = 10
+const webhookLease = 2 * time.Minute
 
 type webhookDelivery struct {
 	ID             string
@@ -36,7 +37,8 @@ func (repository *PostgreSQLRepository) claimWebhookDelivery(ctx context.Context
 		       subscription.secret, delivery.payload, delivery.attempt_count
 		FROM webhook_deliveries AS delivery
 		JOIN webhook_subscriptions AS subscription ON subscription.id = delivery.subscription_id
-		WHERE delivery.state IN ('pending', 'retry')
+		WHERE (delivery.state IN ('pending', 'retry')
+		       OR (delivery.state = 'delivering' AND delivery.lease_until < NOW()))
 		  AND delivery.next_attempt_at <= NOW()
 		  AND subscription.active = TRUE
 		ORDER BY delivery.next_attempt_at, delivery.created_at
@@ -51,9 +53,10 @@ func (repository *PostgreSQLRepository) claimWebhookDelivery(ctx context.Context
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE webhook_deliveries
-		SET state = 'delivering', attempt_count = attempt_count + 1
+		SET state = 'delivering', attempt_count = attempt_count + 1,
+		    lease_until = NOW() + $2::interval
 		WHERE id = $1
-	`, item.ID); err != nil {
+	`, item.ID, strconv.FormatInt(int64(webhookLease/time.Second), 10)+" seconds"); err != nil {
 		return item, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -66,7 +69,8 @@ func (repository *PostgreSQLRepository) finishWebhookDelivery(ctx context.Contex
 	if deliveryErr == nil {
 		_, err := repository.pool.Exec(ctx, `
 			UPDATE webhook_deliveries
-			SET state = 'delivered', delivered_at = NOW(), last_error = NULL
+			SET state = 'delivered', delivered_at = NOW(),
+			    lease_until = NULL, last_error = NULL
 			WHERE id = $1 AND state = 'delivering'
 		`, item.ID)
 		return err
@@ -78,7 +82,8 @@ func (repository *PostgreSQLRepository) finishWebhookDelivery(ctx context.Contex
 	delay := time.Duration(1<<min(item.AttemptCount, 8)) * time.Minute
 	_, err := repository.pool.Exec(ctx, `
 		UPDATE webhook_deliveries
-		SET state = $2, next_attempt_at = NOW() + $3::interval, last_error = $4
+		SET state = $2, next_attempt_at = NOW() + $3::interval,
+		    lease_until = NULL, last_error = $4
 		WHERE id = $1 AND state = 'delivering'
 	`, item.ID, nextState, strconv.FormatInt(int64(delay/time.Second), 10)+" seconds", deliveryErr.Error())
 	return err
