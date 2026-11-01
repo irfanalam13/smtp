@@ -3,6 +3,7 @@ use axum::{
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::{Postgres, Row, Transaction};
@@ -79,6 +80,13 @@ struct TargetFolderRequest {
 #[serde(deny_unknown_fields)]
 struct FlagsRequest {
     flags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RetentionRequest {
+    retention_until: Option<DateTime<Utc>>,
+    legal_hold: bool,
 }
 
 #[derive(Deserialize)]
@@ -172,6 +180,18 @@ pub(super) async fn dispatch(
                 forbidden()
             } else {
                 set_message_flags(state, principal, mailbox_id, message_id, body).await
+            }
+        }
+        ("PUT", path) if path.ends_with("/retention") => {
+            let Some((mailbox_id, message_id)) =
+                message_resource_ids(path.strip_suffix("/retention").unwrap_or_default())
+            else {
+                return Some(not_found());
+            };
+            if !has_scope(principal, "mailbox:manage") {
+                forbidden()
+            } else {
+                set_message_retention(state, principal, mailbox_id, message_id, body).await
             }
         }
         ("DELETE", path) if path.contains("/messages/") && !path.contains("/labels/") => {
@@ -1488,6 +1508,54 @@ async fn copy_or_move_message(
         StatusCode::OK,
         json!({"id": result_id, "folder_id": request.target_folder_id, "uid": target_uid}),
     )
+}
+
+async fn set_message_retention(
+    state: &AppState,
+    principal: &InternalPrincipal,
+    mailbox_id: Uuid,
+    message_id: Uuid,
+    body: &[u8],
+) -> Response {
+    let request: RetentionRequest = match serde_json::from_slice(body) {
+        Ok(request) => request,
+        Err(_) => return bad_request(),
+    };
+    let tenant_id = match Uuid::parse_str(&principal.tenant_id) {
+        Ok(value) => value,
+        Err(_) => return bad_request(),
+    };
+    let user_id = match Uuid::parse_str(&principal.user_id) {
+        Ok(value) => value,
+        Err(_) => return bad_request(),
+    };
+    match state
+        .mailbox_store
+        .set_archive_policy(
+            tenant_id,
+            user_id,
+            mailbox_id,
+            message_id,
+            request.retention_until,
+            request.legal_hold,
+        )
+        .await
+    {
+        Ok(()) => json_response(
+            StatusCode::OK,
+            json!({
+                "mailbox_id": mailbox_id,
+                "message_id": message_id,
+                "retention_until": request.retention_until,
+                "legal_hold": request.legal_hold
+            }),
+        ),
+        Err(smtp_core::MailboxStoreError::InvalidWorkflowState) => not_found(),
+        Err(smtp_core::MailboxStoreError::Database(error)) => {
+            database_error(error, "update message retention policy")
+        }
+        Err(_) => bad_request(),
+    }
 }
 
 async fn set_message_flags(

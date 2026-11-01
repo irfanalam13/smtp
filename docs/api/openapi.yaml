@@ -969,6 +969,29 @@ paths:
         "400": { $ref: "#/components/responses/InvalidRequest" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/mailboxes/{mailbox_id}/messages/{message_id}/retention:
+    put:
+      summary: Set message retention and legal hold
+      description: Requires mailbox:manage. Expired messages are deleted by the mailbox retention worker unless legal_hold is true.
+      parameters:
+        - { name: mailbox_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: message_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [legal_hold]
+              properties:
+                retention_until: { type: string, format: date-time, nullable: true }
+                legal_hold: { type: boolean }
+      responses:
+        "200": { description: Retention policy updated }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/mailboxes/{mailbox_id}/messages/{message_id}/copy:
     post:
       summary: Copy a message to another folder in this mailbox
