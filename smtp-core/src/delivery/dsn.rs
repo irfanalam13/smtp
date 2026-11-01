@@ -81,6 +81,115 @@ pub enum DsnError {
     MissingFeedbackType,
     #[error("recipient or reporting MTA contains control characters")]
     InvalidField,
+    #[error("DSN is empty or exceeds the parser limit")]
+    InvalidMessageSize,
+    #[error("DSN is missing a required delivery-status field")]
+    MissingDeliveryStatusField,
+}
+
+const MAX_DSN_BYTES: usize = 256 * 1024;
+
+pub fn parse_delivery_status(
+    original_message_id: Uuid,
+    raw: &[u8],
+) -> Result<Vec<DsnReport>, DsnError> {
+    if raw.is_empty() || raw.len() > MAX_DSN_BYTES {
+        return Err(DsnError::InvalidMessageSize);
+    }
+    let text = std::str::from_utf8(raw).map_err(|_| DsnError::InvalidField)?;
+    let mut reports = Vec::new();
+    let mut fields = Vec::new();
+    let mut current_name = String::new();
+    let mut current_value = String::new();
+    let mut in_status_part = false;
+    for line in text.lines() {
+        if line.is_empty() {
+            if in_status_part {
+                push_dsn_field(&mut fields, &mut current_name, &mut current_value);
+                if !fields.is_empty() {
+                    reports.push(build_dsn_report(original_message_id, &fields)?);
+                    fields.clear();
+                }
+            }
+            in_status_part = true;
+            continue;
+        }
+        if !in_status_part {
+            continue;
+        }
+        if line.chars().next().is_some_and(char::is_whitespace) {
+            if !current_name.is_empty() {
+                current_value.push(' ');
+                current_value.push_str(line.trim());
+            }
+            continue;
+        }
+        push_dsn_field(&mut fields, &mut current_name, &mut current_value);
+        let Some((name, value)) = line.split_once(':') else {
+            return Err(DsnError::InvalidField);
+        };
+        current_name = name.trim().to_owned();
+        current_value = value.trim().to_owned();
+    }
+    push_dsn_field(&mut fields, &mut current_name, &mut current_value);
+    if in_status_part && !fields.is_empty() {
+        reports.push(build_dsn_report(original_message_id, &fields)?);
+    }
+    if reports.is_empty() {
+        return Err(DsnError::MissingDeliveryStatusField);
+    }
+    Ok(reports)
+}
+
+fn push_dsn_field(fields: &mut Vec<(String, String)>, name: &mut String, value: &mut String) {
+    if !name.is_empty() {
+        fields.push((std::mem::take(name), std::mem::take(value)));
+    }
+}
+
+fn build_dsn_report(
+    original_message_id: Uuid,
+    fields: &[(String, String)],
+) -> Result<DsnReport, DsnError> {
+    let value = |name: &str| {
+        fields
+            .iter()
+            .find(|(field, _)| field.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    };
+    let recipient = value("Final-Recipient")
+        .and_then(|value| {
+            value
+                .split_once(';')
+                .map(|(_, address)| address.trim().to_owned())
+        })
+        .ok_or(DsnError::MissingDeliveryStatusField)?;
+    let reporting_mta = value("Reporting-MTA")
+        .and_then(|value| {
+            value
+                .split_once(';')
+                .map(|(_, host)| host.trim().to_owned())
+        })
+        .ok_or(DsnError::MissingDeliveryStatusField)?;
+    let action = match value("Action").as_deref() {
+        Some("delivered") => DsnAction::Delivered,
+        Some("delayed") => DsnAction::Delayed,
+        Some("failed") => DsnAction::Failed,
+        _ => return Err(DsnError::MissingDeliveryStatusField),
+    };
+    let status = value("Status").ok_or(DsnError::MissingDeliveryStatusField)?;
+    let diagnostic_code = value("Diagnostic-Code");
+    generate_dsn(
+        original_message_id,
+        &recipient,
+        &reporting_mta,
+        DsnStatus {
+            action,
+            status,
+            diagnostic_code,
+        },
+    )
 }
 
 pub fn parse_feedback_report(headers: &[(String, String)]) -> Result<FeedbackReport, DsnError> {
@@ -220,6 +329,36 @@ mod tests {
                 }
             ),
             Err(DsnError::InvalidStatus)
+        ));
+    }
+
+    #[test]
+    fn parses_bounded_delivery_status_parts() {
+        let reports = parse_delivery_status(
+            Uuid::nil(),
+            b"Content-Type: multipart/report\r\n\
+              \r\n\
+              Reporting-MTA: dns; mx.example.test\r\n\
+              Final-Recipient: rfc822; user@example.test\r\n\
+              Action: failed\r\n\
+              Status: 5.1.1\r\n\
+              Diagnostic-Code: smtp; 550 5.1.1 no such user\r\n",
+        )
+        .unwrap();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].recipient, "user@example.test");
+        assert_eq!(reports[0].status.status, "5.1.1");
+    }
+
+    #[test]
+    fn rejects_unbounded_or_incomplete_delivery_status() {
+        assert!(matches!(
+            parse_delivery_status(Uuid::nil(), b"Reporting-MTA: dns; mx.example.test\r\n"),
+            Err(DsnError::MissingDeliveryStatusField)
+        ));
+        assert!(matches!(
+            parse_delivery_status(Uuid::nil(), &vec![b'x'; MAX_DSN_BYTES + 1]),
+            Err(DsnError::InvalidMessageSize)
         ));
     }
 }

@@ -83,7 +83,7 @@ pub use validation::compliance::{ComplianceFixture, ComplianceResult, run_compli
 
 pub use delivery::dsn::{
     BounceClass, DeliveryTracker, DsnAction, DsnError, DsnReport, DsnStatus, FeedbackReport,
-    FeedbackType, classify_bounce, generate_dsn, parse_feedback_report,
+    FeedbackType, classify_bounce, generate_dsn, parse_delivery_status, parse_feedback_report,
 };
 pub use events::{EventEnvelope, EventId, EventType, ProducerIdentity, SchemaVersion};
 pub use events::{EventError, EventPublisher, PublishReceipt};
