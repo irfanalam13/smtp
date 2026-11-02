@@ -131,6 +131,11 @@ func (repository *PostgreSQLRepository) enqueueSubmission(
 	if len(body) > maxSubmissionBytes {
 		return Submission{}, false, ErrInvalid
 	}
+	if principal.durable {
+		if err := repository.ConsumeUsageTx(ctx, tx, principal.TenantID, len(body)); err != nil {
+			return Submission{}, false, err
+		}
+	}
 	indexedMetadata, err := indexedSubmissionMetadata(body)
 	if err != nil {
 		return Submission{}, false, fmt.Errorf("parse generated canonical submission: %w", err)

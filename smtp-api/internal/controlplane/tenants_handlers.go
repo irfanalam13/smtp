@@ -22,6 +22,9 @@ func (h Handler) me(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+	} else if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
+		return
 	} else {
 		t, _ = h.Store.Tenant(p.TenantID)
 	}
@@ -41,6 +44,9 @@ func (h Handler) tenant(w http.ResponseWriter, r *http.Request) {
 	if h.Postgres != nil && p.durable {
 		t, err = h.Postgres.Tenant(r.Context(), p)
 		found = err == nil
+	} else if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
+		return
 	} else {
 		t, found = h.Store.Tenant(p.TenantID)
 	}

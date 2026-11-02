@@ -26,6 +26,10 @@ func (h Handler) keys(w http.ResponseWriter, r *http.Request) {
 		JSON(w, 200, map[string]any{"items": items})
 		return
 	}
+	if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
+		return
+	}
 	JSON(w, 200, map[string]any{"items": h.Store.Keys(p, limit)})
 }
 
@@ -63,6 +67,9 @@ func (h Handler) createKey(w http.ResponseWriter, r *http.Request) {
 		key, secret, err = h.Postgres.CreateAPIKey(
 			r.Context(), p, strings.TrimSpace(req.Name), req.Scopes, req.ExpiresAt,
 		)
+	} else if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
+		return
 	} else {
 		key, secret, err = h.Store.CreateKey(p, strings.TrimSpace(req.Name), req.Scopes, req.ExpiresAt)
 	}
@@ -110,6 +117,9 @@ func (h Handler) revokeKey(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if h.Postgres != nil && isDatabasePrincipal(p) {
 		err = h.Postgres.RevokeAPIKey(r.Context(), p, r.PathValue("id"))
+	} else if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
+		return
 	} else {
 		err = h.Store.RevokeKey(p, r.PathValue("id"))
 	}

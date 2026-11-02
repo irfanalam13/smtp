@@ -34,6 +34,9 @@ var rolePermissions = map[string]map[string]bool{
 		"smtp:credentials:read": true, "smtp:credentials:write": true,
 		"delivery:read": true, "delivery:write": true,
 		"mailbox:read": true, "mailbox:write": true, "mailbox:manage": true,
+		"audit:read":        true,
+		"webhooks:read":     true, "webhooks:write": true,
+		"suppressions:read": true, "suppressions:write": true,
 	},
 	"admin": {
 		"domains:read": true, "domains:write": true,
@@ -41,11 +44,15 @@ var rolePermissions = map[string]map[string]bool{
 		"smtp:credentials:read": true, "smtp:credentials:write": true,
 		"delivery:read": true, "delivery:write": true,
 		"mailbox:read": true, "mailbox:write": true, "mailbox:manage": true,
+		"audit:read":        true,
+		"webhooks:read":     true, "webhooks:write": true,
+		"suppressions:read": true, "suppressions:write": true,
 	},
 	"member": {
 		"domains:read":  true,
 		"delivery:read": true,
 		"mailbox:read":  true, "mailbox:write": true,
+		"suppressions:read": true,
 	},
 }
 
