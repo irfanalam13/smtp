@@ -135,8 +135,13 @@ func (repository *PostgreSQLRepository) AuthenticateOIDCSubject(
 		  ON membership.user_id = account.id
 		JOIN tenants AS tenant
 		  ON tenant.id = membership.tenant_id AND tenant.status = 'active'
-		WHERE account.external_subject = $1
-		  AND account.identity_issuer = $2
+		WHERE (
+		    (account.external_subject = $1 AND account.identity_issuer = $2)
+		    OR EXISTS (
+		        SELECT 1 FROM user_identities ui
+		        WHERE ui.user_id = account.id AND ui.subject = $1 AND ui.issuer = $2
+		    )
+		)
 		  AND account.status = 'active'
 		  AND ($3 = '' OR membership.tenant_id::text = $3)
 		ORDER BY membership.created_at, membership.tenant_id
@@ -286,6 +291,12 @@ func (repository *PostgreSQLRepository) AuthenticateOrProvisionOIDCSubject(
 	if err != nil {
 		return Principal{}, fmt.Errorf("create oidc tenant membership: %w", err)
 	}
+
+	_, _ = tx.Exec(ctx, `
+		INSERT INTO user_identities (user_id, issuer, subject)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (issuer, subject) DO NOTHING
+	`, newUserID, issuer, subject)
 
 	if err := tx.Commit(ctx); err != nil {
 		return Principal{}, fmt.Errorf("commit oidc provision: %w", err)

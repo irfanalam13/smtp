@@ -114,7 +114,9 @@ export function ActivityView({
                   {attempt.error_category && (
                     <p>Error category: {statusLabel(attempt.error_category)}</p>
                   )}
-                  {attempt.smtp_code && <p>SMTP response: {attempt.smtp_code}</p>}
+                  {attempt.smtp_code && (
+                    <p>SMTP response: {attempt.smtp_code}</p>
+                  )}
                   {attempt.remote_host && <p>Server: {attempt.remote_host}</p>}
                   {attempt.diagnostic && (
                     <p className="attempt-diagnostic">{attempt.diagnostic}</p>

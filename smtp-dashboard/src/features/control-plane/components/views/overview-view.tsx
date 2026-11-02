@@ -70,11 +70,21 @@ export function OverviewView({
 
   return (
     <>
-      <section aria-labelledby="overview-heading" className="relative isolate overflow-hidden rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-teal-50 px-6 py-8 text-zinc-900 shadow-sm sm:px-10 sm:py-10">
+      <section
+        aria-labelledby="overview-heading"
+        className="relative isolate overflow-hidden rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-teal-50 px-6 py-8 text-zinc-900 shadow-sm sm:px-10 sm:py-10"
+      >
         <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-emerald-200/40 blur-3xl" />
         <div className="relative max-w-2xl">
-          <span className="inline-flex rounded-full border border-emerald-200 bg-white/70 px-3 py-1 text-[10px] font-bold tracking-[0.18em] text-emerald-700">WORKSPACE STATUS</span>
-          <h2 id="overview-heading" className="mt-5 max-w-xl text-3xl font-semibold tracking-tight text-emerald-950 sm:text-4xl">Everything you need to send with confidence.</h2>
+          <span className="inline-flex rounded-full border border-emerald-200 bg-white/70 px-3 py-1 text-[10px] font-bold tracking-[0.18em] text-emerald-700">
+            WORKSPACE STATUS
+          </span>
+          <h2
+            id="overview-heading"
+            className="mt-5 max-w-xl text-3xl font-semibold tracking-tight text-emerald-950 sm:text-4xl"
+          >
+            Everything you need to send with confidence.
+          </h2>
           <p className="mt-4 max-w-xl text-sm leading-6 text-zinc-600 sm:text-base">
             Verify your domain, issue only the credentials you need, and follow
             each message through the queue.
@@ -97,7 +107,10 @@ export function OverviewView({
           </div>
         </div>
         <div className="absolute bottom-6 right-6 hidden max-w-60 items-center gap-3 rounded-2xl border border-emerald-100 bg-white/80 px-4 py-3 shadow-sm backdrop-blur sm:flex">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-amber-100" aria-hidden="true">
+          <span
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-amber-100"
+            aria-hidden="true"
+          >
             <span className="h-2 w-2 rounded-full bg-amber-500" />
           </span>
           <span className="min-w-0">

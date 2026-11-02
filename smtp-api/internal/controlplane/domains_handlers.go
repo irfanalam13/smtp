@@ -38,6 +38,10 @@ func (h Handler) checksRun(w http.ResponseWriter, r *http.Request) {
 		JSON(w, 200, check)
 		return
 	}
+	if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
+		return
+	}
 	check, err := h.Store.CheckDomain(p, r.PathValue("id"), resolver)
 	if err == ErrNotFound {
 		Error(w, 404, "not_found", "domain not found")
@@ -70,6 +74,10 @@ func (h Handler) checksGet(w http.ResponseWriter, r *http.Request) {
 		JSON(w, 200, check)
 		return
 	}
+	if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
+		return
+	}
 	check, err := h.Store.DomainCheck(p, r.PathValue("id"))
 	if err == ErrNotFound {
 		Error(w, 404, "not_found", "domain not found")
@@ -98,6 +106,10 @@ func (h Handler) readiness(w http.ResponseWriter, r *http.Request) {
 			check = DomainCheck{DomainID: r.PathValue("id"), Stale: true}
 		}
 		JSON(w, 200, readinessResponse(check))
+		return
+	}
+	if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
 		return
 	}
 	check, err := h.Store.DomainCheck(p, r.PathValue("id"))
@@ -144,6 +156,10 @@ func (h Handler) domains(w http.ResponseWriter, r *http.Request) {
 		JSON(w, 200, map[string]any{"items": items, "next_page": nil})
 		return
 	}
+	if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
+		return
+	}
 	items := h.Store.Domains(p.TenantID)
 	if len(items) > limit {
 		items = items[:limit]
@@ -182,6 +198,9 @@ func (h Handler) createDomain(w http.ResponseWriter, r *http.Request) {
 	)
 	if h.Postgres != nil && isDatabasePrincipal(p) {
 		d, err = h.Postgres.CreateDomain(r.Context(), p, req.Domain)
+	} else if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
+		return
 	} else {
 		d, err = h.Store.AddDomain(p, req.Domain)
 	}
@@ -218,6 +237,10 @@ func (h Handler) challenge(w http.ResponseWriter, r *http.Request) {
 		JSON(w, 201, challenge)
 		return
 	}
+	if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
+		return
+	}
 	token, err := h.Store.Challenge(p, r.PathValue("id"))
 	if err == ErrNotFound {
 		Error(w, 404, "not_found", "domain not found")
@@ -244,6 +267,9 @@ func (h Handler) check(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if h.Postgres != nil && isDatabasePrincipal(p) {
 		err = h.Postgres.CheckDomainChallenge(r.Context(), p, r.PathValue("id"), resolver)
+	} else if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
+		return
 	} else {
 		err = h.Store.CheckChallenge(p, r.PathValue("id"), resolver)
 	}
@@ -273,6 +299,9 @@ func (h Handler) disableDomain(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if h.Postgres != nil && isDatabasePrincipal(p) {
 		err = h.Postgres.DisableDomain(r.Context(), p, r.PathValue("id"))
+	} else if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
+		return
 	} else {
 		err = h.Store.DisableDomain(p, r.PathValue("id"))
 	}

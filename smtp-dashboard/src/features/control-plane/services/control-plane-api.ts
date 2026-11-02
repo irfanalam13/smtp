@@ -93,7 +93,10 @@ export function listSubmissions(context: RequestContext, signal?: AbortSignal) {
   );
 }
 
-export function getSendingConfig(context: RequestContext, signal?: AbortSignal) {
+export function getSendingConfig(
+  context: RequestContext,
+  signal?: AbortSignal,
+) {
   return requestJson<SendingConfig>("/v1/sending/config", context, { signal });
 }
 

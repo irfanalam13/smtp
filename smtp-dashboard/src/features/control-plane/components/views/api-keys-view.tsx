@@ -142,7 +142,9 @@ export function ApiKeysView({
               <label htmlFor="key-expiry">Key lifetime</label>
               <select
                 id="key-expiry"
-                onChange={(event) => onKeyExpiryPresetChange(event.target.value)}
+                onChange={(event) =>
+                  onKeyExpiryPresetChange(event.target.value)
+                }
                 value={keyExpiryPreset}
               >
                 <option value="1_week">1 week</option>

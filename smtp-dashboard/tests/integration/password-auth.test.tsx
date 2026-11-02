@@ -39,20 +39,24 @@ describe("password authentication forms", () => {
     const fetchMock = vi.fn<typeof fetch>();
     fetchMock
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          oidc_enabled: false,
-          password_login_enabled: true,
-          signup_enabled: true,
-          password_reset_enabled: true,
-        })),
+        new Response(
+          JSON.stringify({
+            oidc_enabled: false,
+            password_login_enabled: true,
+            signup_enabled: true,
+            password_reset_enabled: true,
+          }),
+        ),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          status: "authenticated",
-          user_id: "user-1",
-          tenant_id: "tenant-1",
-          expires_at: "2030-01-01T00:00:00Z",
-        })),
+        new Response(
+          JSON.stringify({
+            status: "authenticated",
+            user_id: "user-1",
+            tenant_id: "tenant-1",
+            expires_at: "2030-01-01T00:00:00Z",
+          }),
+        ),
       );
     vi.stubGlobal("fetch", fetchMock);
     renderWithToast(<PasswordLogin />);
@@ -82,18 +86,22 @@ describe("password authentication forms", () => {
     const fetchMock = vi.fn<typeof fetch>();
     fetchMock
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          oidc_enabled: false,
-          password_login_enabled: true,
-          signup_enabled: true,
-          password_reset_enabled: true,
-        })),
+        new Response(
+          JSON.stringify({
+            oidc_enabled: false,
+            password_login_enabled: true,
+            signup_enabled: true,
+            password_reset_enabled: true,
+          }),
+        ),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          status: "verification_pending",
-          message: "Check your email for a verification link.",
-        })),
+        new Response(
+          JSON.stringify({
+            status: "verification_pending",
+            message: "Check your email for a verification link.",
+          }),
+        ),
       );
     vi.stubGlobal("fetch", fetchMock);
     renderWithToast(<SignupForm />);
@@ -157,12 +165,14 @@ describe("password authentication forms", () => {
     const fetchMock = vi.fn<typeof fetch>();
     fetchMock
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          oidc_enabled: false,
-          password_login_enabled: true,
-          signup_enabled: true,
-          password_reset_enabled: true,
-        })),
+        new Response(
+          JSON.stringify({
+            oidc_enabled: false,
+            password_login_enabled: true,
+            signup_enabled: true,
+            password_reset_enabled: true,
+          }),
+        ),
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ status: "password_reset" })),

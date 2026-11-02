@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -130,4 +131,28 @@ func (repository *PostgreSQLRepository) Tenant(
 		return Tenant{}, fmt.Errorf("resolve authenticated tenant: %w", err)
 	}
 	return tenant, nil
+}
+
+func (repository *PostgreSQLRepository) RecordAuditEvent(
+	ctx context.Context,
+	tenantID, actorUserID, action, targetType, targetID string,
+	metadata map[string]any,
+) error {
+	if !validUUID(tenantID) || action == "" || targetType == "" {
+		return ErrInvalid
+	}
+	var metaJSON []byte
+	if metadata != nil {
+		var err error
+		metaJSON, err = json.Marshal(metadata)
+		if err != nil {
+			return err
+		}
+	}
+	_, err := repository.pool.Exec(ctx, `
+		INSERT INTO audit_events
+			(tenant_id, actor_user_id, action, target_type, target_id, metadata)
+		VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, COALESCE($6::jsonb, '{}'::jsonb))
+	`, tenantID, actorUserID, action, targetType, targetID, metaJSON)
+	return err
 }

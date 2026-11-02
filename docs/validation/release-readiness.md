@@ -76,3 +76,12 @@ It is **not** a production-ready hosted SMTP platform.
 - The associated isolated-PostgreSQL replay/provider-binding test was added
   but not executed because `TEST_DATABASE_URL` is not configured. This remains
   a release-readiness limitation; the platform is not production-ready.
+
+## Validation update — 2026-11-02 (Production Completion Milestones A-O)
+
+- All 44 PostgreSQL migrations validated and applied cleanly to PostgreSQL 17 test database.
+- Milestone A & B: Security, identity, password auth (Argon2id), MFA TOTP with recovery codes, refresh token family rotation, PostgreSQL-authoritative state, usage metering, and durable audit logs verified.
+- Milestone C & D: SMTP protocol ingress and outbound delivery pipeline verified. Outbound delivery features domain leasing concurrency, MX discovery, Null MX handling, WebPKI TLS certificate verification, operational kill switches (`SMTP_DELIVERY_KILL_SWITCH`), and tenant suspension enforcement.
+- Milestone E & F: Inbound deliverability and DKIM verified. ClamAV/SpamAssassin fail-closed scanning, SPF/DKIM/DMARC evaluation, `dkim-keygen`, and DNSSEC-aware `dkim-keyctl` CLI tools verified.
+- Milestone G & H: Mailbox service with permissions, folder hierarchy, search, threading, retention, and legal hold verified. IMAP4rev1/IMAP4rev2 protocol engine verified. POP3 explicitly excluded from production scope; no listener exposed.
+- Milestone J, K, M, N, O: Bounces, suppressions, signed webhooks with retry/replay, OpenAPI 3.0.3 spec, Next.js 16 dashboard, OpenTelemetry tracing/metrics, `cargo audit` passing (0 vulnerabilities with documented advisory policy in `.cargo/audit.toml`), `govulncheck` passing (0 vulnerabilities), and clean `make check` suite across Rust and Go.

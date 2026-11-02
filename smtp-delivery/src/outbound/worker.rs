@@ -35,6 +35,21 @@ impl<R: Resolver + 'static> DeliveryWorker<R> {
                 break;
             }
 
+            if self.processor.config.kill_switch {
+                tracing::warn!(
+                    "outbound delivery worker paused: operational kill switch is active"
+                );
+                tokio::select! {
+                    changed = cancel.changed() => {
+                        if changed.is_err() {
+                            break;
+                        }
+                    }
+                    _ = tokio::time::sleep(self.poll_interval) => {}
+                }
+                continue;
+            }
+
             let mut claimed = false;
             while tasks.len() < concurrency && !*cancel.borrow() {
                 let delivery_mode = if let Some(relay) = &self.processor.config.smtp_relay {

@@ -326,6 +326,144 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "503": { description: Session storage is unavailable }
+  /v1/auth/tokens/refresh:
+    post:
+      summary: Refresh authentication tokens
+      description: Exchanges a valid refresh token for a rotated token pair.
+      tags: [Authentication]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        "200":
+          description: Tokens refreshed successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/auth/tokens/revoke:
+    post:
+      summary: Revoke a refresh token family
+      description: Revokes the specified refresh token and invalidates its family.
+      tags: [Authentication]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        "200":
+          description: Token revoked successfully
+  /v1/auth/mfa/totp/setup:
+    post:
+      summary: Initialize TOTP MFA enrollment
+      description: Generates a new TOTP secret and recovery codes for the authenticated user.
+      tags: [Authentication]
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: TOTP setup details returned
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/auth/mfa/totp/confirm:
+    post:
+      summary: Confirm TOTP MFA enrollment
+      description: Verifies initial TOTP passcode to activate MFA.
+      tags: [Authentication]
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+      responses:
+        "200":
+          description: MFA successfully enabled
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+  /v1/auth/mfa/totp/disable:
+    post:
+      summary: Disable TOTP MFA
+      description: Disables MFA after passcode or recovery code confirmation.
+      tags: [Authentication]
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+      responses:
+        "200":
+          description: MFA successfully disabled
+  /v1/auth/mfa/challenge/verify:
+    post:
+      summary: Verify MFA challenge during login
+      description: Completes 2FA step with TOTP passcode or backup recovery code.
+      tags: [Authentication]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challenge_token, code]
+              properties:
+                challenge_token:
+                  type: string
+                code:
+                  type: string
+      responses:
+        "200":
+          description: MFA challenge verified, session created
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/audit/events:
+    get:
+      summary: Query security and operational audit events
+      description: Returns tamper-evident audit event log for the authenticated tenant.
+      tags: [Control plane]
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        "200":
+          description: Audit events list
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /health/ready:
     get:
       summary: API readiness

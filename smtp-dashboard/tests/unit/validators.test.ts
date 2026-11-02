@@ -21,10 +21,7 @@ describe("dashboard form validation", () => {
       body: "Plain text",
     });
 
-    expect(result.to).toEqual([
-      "first@example.net",
-      "second@example.net",
-    ]);
+    expect(result.to).toEqual(["first@example.net", "second@example.net"]);
     expect(result.errors).toEqual({});
 
     const duplicateResult = validateSubmission({

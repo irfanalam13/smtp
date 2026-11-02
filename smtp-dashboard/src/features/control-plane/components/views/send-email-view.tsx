@@ -111,9 +111,7 @@ export function SendEmailView({
             </span>
           </div>
           <textarea
-            aria-describedby={
-              composeErrors.to ? "recipients-error" : undefined
-            }
+            aria-describedby={composeErrors.to ? "recipients-error" : undefined}
             aria-invalid={Boolean(composeErrors.to)}
             id="recipients"
             onChange={(event) => onRecipientsChange(event.target.value)}
@@ -212,7 +210,7 @@ export function SendEmailView({
         <ul className="checklist">
           <li>
             <span className="checkmark" aria-hidden="true">
-            1
+              1
             </span>
             <span>
               <strong>Messages go through the shared SMTP account</strong>
@@ -223,7 +221,7 @@ export function SendEmailView({
           </li>
           <li>
             <span className="checkmark" aria-hidden="true">
-            2
+              2
             </span>
             <span>
               <strong>Check the delivery status</strong>

@@ -74,9 +74,14 @@ type Store struct {
 }
 
 type AuditEvent struct {
-	TenantID, Actor, Action, TargetType, TargetID string
-	Metadata                                      map[string]string
-	At                                            time.Time
+	ID          int64          `json:"id"`
+	TenantID    string         `json:"tenant_id"`
+	ActorUserID *string        `json:"actor_user_id,omitempty"`
+	Action      string         `json:"action"`
+	TargetType  string         `json:"target_type"`
+	TargetID    *string        `json:"target_id,omitempty"`
+	Metadata    map[string]any `json:"metadata"`
+	CreatedAt   time.Time      `json:"created_at"`
 }
 
 type window struct {

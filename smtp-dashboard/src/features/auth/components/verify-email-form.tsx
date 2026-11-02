@@ -14,7 +14,9 @@ export function VerifyEmailForm({ token }: { token: string }) {
   async function verify() {
     setError("");
     if (!token) {
-      setError("This verification link is incomplete. Request another verification email.");
+      setError(
+        "This verification link is incomplete. Request another verification email.",
+      );
       return;
     }
     setBusy(true);
@@ -27,7 +29,8 @@ export function VerifyEmailForm({ token }: { token: string }) {
         message: "Your email is verified. You can now sign in.",
       });
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : "Email verification failed.";
+      const message =
+        reason instanceof Error ? reason.message : "Email verification failed.";
       setError(message);
       toast({ tone: "error", title: "Email verification failed", message });
     } finally {
@@ -38,18 +41,30 @@ export function VerifyEmailForm({ token }: { token: string }) {
   return (
     <section aria-labelledby="verify-email-heading" className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-zinc-900" id="verify-email-heading">
+        <h1
+          className="text-xl font-semibold text-zinc-900"
+          id="verify-email-heading"
+        >
           Verify your email
         </h1>
         <p className="mt-1 text-sm leading-6 text-zinc-600">
           Confirm your email address to activate password sign-in.
         </p>
       </div>
-      {error && <p className="notice notice-error" role="alert">{error}</p>}
+      {error && (
+        <p className="notice notice-error" role="alert">
+          {error}
+        </p>
+      )}
       {verified ? (
         <div className="space-y-3">
-          <p className="notice notice-success" role="status">Your email is verified. You can now sign in.</p>
-          <Link className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white" href="/login">
+          <p className="notice notice-success" role="status">
+            Your email is verified. You can now sign in.
+          </p>
+          <Link
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white"
+            href="/login"
+          >
             Continue to sign in
           </Link>
         </div>

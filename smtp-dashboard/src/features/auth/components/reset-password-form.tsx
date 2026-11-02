@@ -31,7 +31,8 @@ export function ResetPasswordForm({ token }: { token: string }) {
       .catch(() => {
         if (!controller.signal.aborted) {
           setEnabled(false);
-          const message = "Password recovery configuration could not be loaded.";
+          const message =
+            "Password recovery configuration could not be loaded.";
           setError(message);
           toast({ tone: "error", title: "Recovery unavailable", message });
         }
@@ -57,11 +58,13 @@ export function ResetPasswordForm({ token }: { token: string }) {
       toast({
         tone: "success",
         title: "Password updated",
-        message: "Your password has been changed and existing sessions were signed out.",
+        message:
+          "Your password has been changed and existing sessions were signed out.",
       });
       router.replace("/reset-password");
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : "Password reset failed.";
+      const message =
+        reason instanceof Error ? reason.message : "Password reset failed.";
       setError(message);
       toast({ tone: "error", title: "Password reset failed", message });
     } finally {
@@ -72,63 +75,76 @@ export function ResetPasswordForm({ token }: { token: string }) {
   return (
     <section aria-labelledby="reset-password-heading" className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-zinc-900" id="reset-password-heading">
+        <h1
+          className="text-xl font-semibold text-zinc-900"
+          id="reset-password-heading"
+        >
           Choose a new password
         </h1>
         <p className="mt-1 text-sm leading-6 text-zinc-600">
           Reset links expire after 30 minutes and can only be used once.
         </p>
       </div>
-      {error && <p className="notice notice-error" role="alert">{error}</p>}
+      {error && (
+        <p className="notice notice-error" role="alert">
+          {error}
+        </p>
+      )}
       {complete && (
         <p className="notice notice-success" role="status">
           Your password has been changed and existing sessions were signed out.
         </p>
       )}
-      {!complete && (enabled === null ? (
-        <p aria-live="polite" className="text-sm text-zinc-600" role="status">Checking recovery configuration…</p>
-      ) : enabled ? (
-        <form className="space-y-3" onSubmit={(event) => void submit(event)}>
-          <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
-            New password
-            <input
-              autoComplete="new-password"
-              className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
-              maxLength={1024}
-              minLength={8}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              type="password"
-              value={password}
-            />
-          </label>
-          <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
-            Confirm new password
-            <input
-              autoComplete="new-password"
-              className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
-              maxLength={1024}
-              minLength={8}
-              onChange={(event) => setConfirmation(event.target.value)}
-              required
-              type="password"
-              value={confirmation}
-            />
-          </label>
-          <button
-            className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
-            disabled={busy}
-            type="submit"
-          >
-            {busy ? "Updating password…" : "Update password"}
-          </button>
-        </form>
-      ) : (
-        <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-5 text-amber-900">
-          Password recovery is not configured for this deployment.
-        </p>
-      ))}
-      <Link className="text-sm font-medium text-emerald-800 underline underline-offset-4" href="/login">
+      {!complete &&
+        (enabled === null ? (
+          <p aria-live="polite" className="text-sm text-zinc-600" role="status">
+            Checking recovery configuration…
+          </p>
+        ) : enabled ? (
+          <form className="space-y-3" onSubmit={(event) => void submit(event)}>
+            <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
+              New password
+              <input
+                autoComplete="new-password"
+                className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
+                maxLength={1024}
+                minLength={8}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                type="password"
+                value={password}
+              />
+            </label>
+            <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
+              Confirm new password
+              <input
+                autoComplete="new-password"
+                className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
+                maxLength={1024}
+                minLength={8}
+                onChange={(event) => setConfirmation(event.target.value)}
+                required
+                type="password"
+                value={confirmation}
+              />
+            </label>
+            <button
+              className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
+              disabled={busy}
+              type="submit"
+            >
+              {busy ? "Updating password…" : "Update password"}
+            </button>
+          </form>
+        ) : (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-5 text-amber-900">
+            Password recovery is not configured for this deployment.
+          </p>
+        ))}
+      <Link
+        className="text-sm font-medium text-emerald-800 underline underline-offset-4"
+        href="/login"
+      >
         Return to sign in
       </Link>
     </section>

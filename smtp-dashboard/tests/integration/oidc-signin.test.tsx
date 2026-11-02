@@ -27,9 +27,7 @@ describe("OIDC sign-in", () => {
     const signIn = await screen.findByRole("link", {
       name: "Continue with organization SSO",
     });
-    expect(signIn.getAttribute("href")).toBe(
-      "/api/backend/v1/auth/oidc/start",
-    );
+    expect(signIn.getAttribute("href")).toBe("/api/backend/v1/auth/oidc/start");
 
     fireEvent.change(screen.getByLabelText("Organization ID"), {
       target: { value: "123e4567-e89b-12d3-a456-426614174000" },

@@ -86,7 +86,8 @@ export function validateSubmission(input: {
       ["bcc", bcc],
     ] as const) {
       if (list.some((address) => !validEmail(address))) {
-        errors[field] = `Each ${field.toUpperCase()} recipient must be a valid ASCII email address.`;
+        errors[field] =
+          `Each ${field.toUpperCase()} recipient must be a valid ASCII email address.`;
         continue;
       }
       const current = new Set<string>();
@@ -99,7 +100,8 @@ export function validateSubmission(input: {
         current.add(normalized);
       }
       if (duplicate) {
-        errors[field] = "Recipient email addresses must be unique across To, Cc, and Bcc.";
+        errors[field] =
+          "Recipient email addresses must be unique across To, Cc, and Bcc.";
       }
       for (const address of current) {
         seen.add(address);

@@ -10,7 +10,20 @@ func (h Handler) usage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	JSON(w, 200, h.Store.Usage(p))
+	if h.Postgres != nil && p.durable {
+		u, err := h.Postgres.Usage(r.Context(), p)
+		if err != nil {
+			h.databaseError(w, "fetch tenant usage", err)
+			return
+		}
+		JSON(w, http.StatusOK, u)
+		return
+	}
+	if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
+		return
+	}
+	JSON(w, http.StatusOK, h.Store.Usage(p))
 }
 
 func (h Handler) mailboxes(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +54,10 @@ func (h Handler) mailboxes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		JSON(w, http.StatusOK, map[string]any{"items": items, "next_page": nil})
+		return
+	}
+	if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
 		return
 	}
 	JSON(w, http.StatusOK, map[string]any{"items": h.Store.Mailboxes(p.TenantID, limit), "next_page": nil})
@@ -80,6 +97,10 @@ func (h Handler) messages(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		JSON(w, http.StatusOK, map[string]any{"items": items, "next_page": nil})
+		return
+	}
+	if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
 		return
 	}
 	items, err := h.Store.Messages(p.TenantID, r.PathValue("mailbox_id"))
@@ -122,6 +143,10 @@ func (h Handler) message(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		JSON(w, http.StatusOK, item)
+		return
+	}
+	if !h.DevMode {
+		Error(w, http.StatusServiceUnavailable, "database_unavailable", "database is required")
 		return
 	}
 	item, err := h.Store.Message(p.TenantID, r.PathValue("mailbox_id"), r.PathValue("message_id"))

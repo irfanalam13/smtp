@@ -15,13 +15,18 @@ export function LogoutButton() {
     setBusy(true);
     setError("");
     try {
-      await requestJson("/v1/auth/logout", { token: "", tenantId: "" }, {
-        method: "POST",
-      });
+      await requestJson(
+        "/v1/auth/logout",
+        { token: "", tenantId: "" },
+        {
+          method: "POST",
+        },
+      );
       router.replace("/login");
       router.refresh();
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : "Sign-out failed.";
+      const message =
+        reason instanceof Error ? reason.message : "Sign-out failed.";
       setError(message);
       toast({ tone: "error", title: "Sign-out failed", message });
       setBusy(false);
@@ -30,7 +35,11 @@ export function LogoutButton() {
 
   return (
     <span className="flex items-center gap-2">
-      {error && <span className="text-xs text-rose-700" role="alert">{error}</span>}
+      {error && (
+        <span className="text-xs text-rose-700" role="alert">
+          {error}
+        </span>
+      )}
       <button
         className="button button-quiet"
         disabled={busy}

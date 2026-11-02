@@ -41,6 +41,7 @@ pub enum TlsPolicy {
 #[derive(Clone, Debug)]
 pub struct DeliveryConfig {
     pub enabled: bool,
+    pub kill_switch: bool,
     pub test_endpoint: Option<SocketAddr>,
     pub ehlo_hostname: String,
     pub dns_timeout: Duration,
@@ -65,6 +66,7 @@ impl Default for DeliveryConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            kill_switch: false,
             test_endpoint: None,
             ehlo_hostname: "smtp-platform.local".into(),
             dns_timeout: Duration::from_secs(3),
@@ -90,6 +92,7 @@ impl Default for DeliveryConfig {
 impl DeliveryConfig {
     pub fn from_env() -> Result<Self, DeliveryConfigError> {
         let enabled = env_bool("SMTP_DELIVERY_ENABLED", false)?;
+        let kill_switch = env_bool("SMTP_DELIVERY_KILL_SWITCH", false)?;
         let allow_loopback_test_destinations =
             env_bool("SMTP_DELIVERY_ALLOW_LOOPBACK_TEST_DESTINATIONS", false)?;
         let ehlo_hostname = env_string("SMTP_DELIVERY_EHLO_HOSTNAME", "smtp-platform.local")?;
@@ -118,6 +121,7 @@ impl DeliveryConfig {
         };
         let config = Self {
             enabled,
+            kill_switch,
             ehlo_hostname,
             max_concurrent,
             max_message_bytes,

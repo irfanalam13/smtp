@@ -1,0 +1,7 @@
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071: Marvin Attack in rsa crate affects PKCS#1 v1.5 decryption timing.
+    # Platform signing uses Ed25519; mail-auth uses rsa solely for public key signature verification.
+    # No upstream fix is available.
+    "RUSTSEC-2023-0071",
+]

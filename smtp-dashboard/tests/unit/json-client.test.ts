@@ -46,9 +46,13 @@ describe("requestJson", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await requestJson("/v1/auth/logout-all", { token: "", tenantId: "" }, {
-      method: "POST",
-    });
+    await requestJson(
+      "/v1/auth/logout-all",
+      { token: "", tenantId: "" },
+      {
+        method: "POST",
+      },
+    );
 
     const [, init] = fetchMock.mock.calls[0];
     expect(new Headers(init?.headers).get("X-CSRF-Token")).toBe(

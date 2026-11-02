@@ -72,7 +72,24 @@ func (s *Store) Tenant(id string) (Tenant, bool) {
 }
 
 func (s *Store) auditLocked(p Principal, action, target, id string) {
-	s.events = append(s.events, AuditEvent{TenantID: p.TenantID, Actor: p.UserID, Action: action, TargetType: target, TargetID: id, At: time.Now().UTC()})
+	now := time.Now().UTC()
+	var actor *string
+	if p.UserID != "" {
+		actor = &p.UserID
+	}
+	var targetID *string
+	if id != "" {
+		targetID = &id
+	}
+	s.events = append(s.events, AuditEvent{
+		TenantID:    p.TenantID,
+		ActorUserID: actor,
+		Action:      action,
+		TargetType:  target,
+		TargetID:    targetID,
+		Metadata:    map[string]any{},
+		CreatedAt:   now,
+	})
 }
 
 func (s *Store) Allow(key string, limit int, period time.Duration) bool {

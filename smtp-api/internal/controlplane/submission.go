@@ -425,6 +425,9 @@ func (h Handler) submit(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, ErrForbidden):
 		Error(w, http.StatusForbidden, "sender_domain_unverified", "sender address must use a verified tenant domain")
 		return
+	case errors.Is(err, ErrRateLimited):
+		Error(w, http.StatusTooManyRequests, "rate_limited", "tenant hourly message limit exceeded")
+		return
 	case errors.Is(err, ErrInvalid):
 		Error(w, http.StatusBadRequest, "invalid_submission", "submission exceeds queue limits or contains invalid data")
 		return

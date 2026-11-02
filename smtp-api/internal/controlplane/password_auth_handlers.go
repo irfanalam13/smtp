@@ -279,6 +279,19 @@ func (h Handler) passwordLogin(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusUnauthorized, "unauthorized", "email or password is incorrect")
 		return
 	}
+	if account.TOTPConfirmed {
+		challengeToken, err := h.Postgres.CreateMFAChallenge(r.Context(), principal.UserID, principal.TenantID, "login", 5*time.Minute)
+		if err != nil {
+			h.databaseError(w, "create MFA challenge", err)
+			return
+		}
+		JSON(w, http.StatusOK, map[string]any{
+			"status":          "mfa_required",
+			"challenge_token": challengeToken,
+			"mfa_type":        "totp",
+		})
+		return
+	}
 	session, err := h.issueBrowserSession(w, r, principal)
 	if err != nil {
 		if errors.Is(err, ErrUnauthorized) {
@@ -301,7 +314,20 @@ func (h Handler) passwordLogin(w http.ResponseWriter, r *http.Request) {
 		response["access_token"] = token
 		response["token_type"] = "Bearer"
 		response["access_token_expires_at"] = expiresAt
+
+		sessionIDStr := session.ID
+		rawRefresh, _, refreshExpiresAt, refreshErr := h.Postgres.CreateRefreshToken(
+			r.Context(), principal, &sessionIDStr, nil, 30*24*time.Hour,
+		)
+		if refreshErr == nil {
+			response["refresh_token"] = rawRefresh
+			response["refresh_token_expires_at"] = refreshExpiresAt
+		}
 	}
+	_ = h.Postgres.RecordAuditEvent(
+		r.Context(), principal.TenantID, principal.UserID, "auth.login_password_success",
+		"user", principal.UserID, nil,
+	)
 	JSON(w, http.StatusOK, response)
 }
 

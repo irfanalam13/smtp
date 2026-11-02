@@ -110,6 +110,9 @@ func run() error {
 	metrics := observability.NewMetrics()
 	socialOAuth := socialOAuthConfigFromEnv(os.Getenv, authSessions.PublicOrigin)
 	rateLimitKey := []byte(strings.TrimSpace(os.Getenv("API_RATE_LIMIT_HMAC_KEY")))
+	if len(rateLimitKey) == 0 && devMode {
+		rateLimitKey = []byte("local-development-rate-limit-hmac-key-32b")
+	}
 	if !devMode && len(rateLimitKey) < 32 {
 		return fmt.Errorf("API_RATE_LIMIT_HMAC_KEY must contain at least 32 bytes in production")
 	}

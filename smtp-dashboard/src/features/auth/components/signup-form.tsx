@@ -41,7 +41,8 @@ export function SignupForm() {
       .catch(() => {
         if (mounted) {
           setEnabled(false);
-          const message = "Registration configuration could not be loaded. Try again later.";
+          const message =
+            "Registration configuration could not be loaded. Try again later.";
           setError(message);
           toast({ tone: "error", title: "Registration unavailable", message });
         }
@@ -97,7 +98,8 @@ export function SignupForm() {
       setMessage(response.message);
       toast({
         tone: "success",
-        title: response.status === "verified" ? "Account ready" : "Account created",
+        title:
+          response.status === "verified" ? "Account ready" : "Account created",
         message: response.message,
       });
       if (response.verification_url) {
@@ -109,7 +111,8 @@ export function SignupForm() {
       }
       setCanResend(true);
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : "Registration failed.";
+      const message =
+        reason instanceof Error ? reason.message : "Registration failed.";
       setError(message);
       toast({
         tone: "error",
@@ -133,17 +136,18 @@ export function SignupForm() {
     setBusy(true);
     try {
       await resendVerification(email);
-      const message = "If verification is still needed, a new link has been sent.";
+      const message =
+        "If verification is still needed, a new link has been sent.";
       setMessage(message);
       toast({ tone: "success", title: "Verification email sent", message });
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : "The request failed.";
+      const message =
+        reason instanceof Error ? reason.message : "The request failed.";
       setError(message);
       toast({ tone: "error", title: "Verification email failed", message });
     } finally {
       setBusy(false);
     }
-
   }
 
   const passwordChecks = [
@@ -158,143 +162,221 @@ export function SignupForm() {
   return (
     <section aria-labelledby="signup-heading" className="space-y-4">
       <div>
-        <p className="text-xs font-semibold tracking-[0.18em] text-emerald-700">SMTP PLATFORM</p>
-        <h1 className="mt-2 text-xl font-semibold text-zinc-900" id="signup-heading">
+        <p className="text-xs font-semibold tracking-[0.18em] text-emerald-700">
+          SMTP PLATFORM
+        </p>
+        <h1
+          className="mt-2 text-xl font-semibold text-zinc-900"
+          id="signup-heading"
+        >
           Create your account
         </h1>
         <p className="mt-1 text-sm leading-6 text-zinc-600">
           Create a workspace. Email verification is required before sign-in.
         </p>
       </div>
-      {error && <p className="notice notice-error" role="alert">{error}</p>}
-      {message && <p className="notice notice-success" role="status">{message}</p>}
+      {error && (
+        <p className="notice notice-error" role="alert">
+          {error}
+        </p>
+      )}
+      {message && (
+        <p className="notice notice-success" role="status">
+          {message}
+        </p>
+      )}
       {enabled === null ? (
-        <p aria-live="polite" className="text-sm text-zinc-600" role="status">Checking registration…</p>
-      ) : enabled ? message ? (
-        <div className="space-y-3">
-          {isVerified ? (
-            <Link
-              className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800"
-              href="/login"
-            >
-              Sign in now &rarr;
-            </Link>
-          ) : verificationUrl ? (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-              <span className="font-semibold">Development mode:</span>{" "}
-              <a href={verificationUrl} className="font-bold text-emerald-800 underline">
-                Click here to verify email
-              </a>
-            </div>
-          ) : null}
-          {!isVerified && canResend && (
-            <button
-              className="button button-quiet"
-              disabled={busy || !email}
-              onClick={() => void resend()}
-              type="button"
-            >
-              {busy ? "Sending…" : "Resend verification email"}
-            </button>
-          )}
-          <p className="text-sm text-zinc-600">
-            Already verified? <Link className="font-medium text-emerald-800 underline" href="/login">Sign in</Link>
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-        <form className="space-y-3" onSubmit={(event) => void submit(event)}>
-          <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
-            First name
-            <input autoComplete="given-name" className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm" maxLength={50} minLength={2} onChange={(event) => setFirstName(event.target.value)} required value={firstName} />
-          </label>
-          <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
-            Last name
-            <input autoComplete="family-name" className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm" maxLength={50} minLength={2} onChange={(event) => setLastName(event.target.value)} required value={lastName} />
-          </label>
+        <p aria-live="polite" className="text-sm text-zinc-600" role="status">
+          Checking registration…
+        </p>
+      ) : enabled ? (
+        message ? (
+          <div className="space-y-3">
+            {isVerified ? (
+              <Link
+                className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800"
+                href="/login"
+              >
+                Sign in now &rarr;
+              </Link>
+            ) : verificationUrl ? (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                <span className="font-semibold">Development mode:</span>{" "}
+                <a
+                  href={verificationUrl}
+                  className="font-bold text-emerald-800 underline"
+                >
+                  Click here to verify email
+                </a>
+              </div>
+            ) : null}
+            {!isVerified && canResend && (
+              <button
+                className="button button-quiet"
+                disabled={busy || !email}
+                onClick={() => void resend()}
+                type="button"
+              >
+                {busy ? "Sending…" : "Resend verification email"}
+              </button>
+            )}
+            <p className="text-sm text-zinc-600">
+              Already verified?{" "}
+              <Link
+                className="font-medium text-emerald-800 underline"
+                href="/login"
+              >
+                Sign in
+              </Link>
+            </p>
           </div>
-          <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
-            Work email
-            <input
-              autoComplete="email"
-              className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
-              onChange={(event) => setEmail(event.target.value)}
-              required
-              type="email"
-              value={email}
-            />
-          </label>
-          <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
-            Organization name
-            <input
-              autoComplete="organization"
-              className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
-              maxLength={160}
-              onChange={(event) => setOrganization(event.target.value)}
-              value={organization}
-            />
-          </label>
-            <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
-              Phone number <span className="font-normal text-zinc-500">(optional)</span>
-              <input autoComplete="tel" className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm" onChange={(event) => setPhoneNumber(event.target.value)} value={phoneNumber} />
-            </label>
-            <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
-              Country <span className="font-normal text-zinc-500">(optional)</span>
-              <input autoComplete="country-name" className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm" onChange={(event) => setCountry(event.target.value)} value={country} />
-            </label>
-            </div>
-            <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
-            Password
-            <input
-              autoComplete="new-password"
-              className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
-              minLength={8}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              type="password"
-              value={password}
-            />
-              <span className="block text-xs font-normal text-zinc-500">
-                Strength: {["", "weak", "weak", "fair", "good", "strong"][passwordStrength] || "weak"}.
-                {" "}Use 8+ characters with uppercase, lowercase, number, and symbol.
-              </span>
-            </label>
-            <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
-              Confirm password
-              <input autoComplete="new-password" className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm" onChange={(event) => setConfirmPassword(event.target.value)} required type="password" value={confirmPassword} />
-            </label>
-            <label className="flex items-start gap-2 text-sm text-zinc-700">
-              <input checked={termsAccepted} className="mt-1" onChange={(event) => setTermsAccepted(event.target.checked)} required type="checkbox" />
-              <span>I agree to the SMTP Platform terms and conditions.</span>
-            </label>
-          <button
-            className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
-            disabled={busy}
-            type="submit"
-          >
-            {busy ? "Creating account…" : "Create account"}
-          </button>
-        </form>
-        {canResend && (
-          <button
-            className="text-sm font-medium text-emerald-800 underline underline-offset-4 disabled:opacity-60"
-            disabled={busy || !email}
-            onClick={() => void resend()}
-            type="button"
-          >
-            {busy ? "Sending…" : "Resend verification email"}
-          </button>
-        )}
-        </div>
+        ) : (
+          <div className="space-y-3">
+            <form
+              className="space-y-3"
+              onSubmit={(event) => void submit(event)}
+            >
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
+                  First name
+                  <input
+                    autoComplete="given-name"
+                    className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
+                    maxLength={50}
+                    minLength={2}
+                    onChange={(event) => setFirstName(event.target.value)}
+                    required
+                    value={firstName}
+                  />
+                </label>
+                <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
+                  Last name
+                  <input
+                    autoComplete="family-name"
+                    className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
+                    maxLength={50}
+                    minLength={2}
+                    onChange={(event) => setLastName(event.target.value)}
+                    required
+                    value={lastName}
+                  />
+                </label>
+              </div>
+              <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
+                Work email
+                <input
+                  autoComplete="email"
+                  className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
+                  onChange={(event) => setEmail(event.target.value)}
+                  required
+                  type="email"
+                  value={email}
+                />
+              </label>
+              <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
+                Organization name
+                <input
+                  autoComplete="organization"
+                  className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
+                  maxLength={160}
+                  onChange={(event) => setOrganization(event.target.value)}
+                  value={organization}
+                />
+              </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
+                  Phone number{" "}
+                  <span className="font-normal text-zinc-500">(optional)</span>
+                  <input
+                    autoComplete="tel"
+                    className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
+                    onChange={(event) => setPhoneNumber(event.target.value)}
+                    value={phoneNumber}
+                  />
+                </label>
+                <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
+                  Country{" "}
+                  <span className="font-normal text-zinc-500">(optional)</span>
+                  <input
+                    autoComplete="country-name"
+                    className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
+                    onChange={(event) => setCountry(event.target.value)}
+                    value={country}
+                  />
+                </label>
+              </div>
+              <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
+                Password
+                <input
+                  autoComplete="new-password"
+                  className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
+                  minLength={8}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                  type="password"
+                  value={password}
+                />
+                <span className="block text-xs font-normal text-zinc-500">
+                  Strength:{" "}
+                  {["", "weak", "weak", "fair", "good", "strong"][
+                    passwordStrength
+                  ] || "weak"}
+                  . Use 8+ characters with uppercase, lowercase, number, and
+                  symbol.
+                </span>
+              </label>
+              <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
+                Confirm password
+                <input
+                  autoComplete="new-password"
+                  className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm"
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  required
+                  type="password"
+                  value={confirmPassword}
+                />
+              </label>
+              <label className="flex items-start gap-2 text-sm text-zinc-700">
+                <input
+                  checked={termsAccepted}
+                  className="mt-1"
+                  onChange={(event) => setTermsAccepted(event.target.checked)}
+                  required
+                  type="checkbox"
+                />
+                <span>I agree to the SMTP Platform terms and conditions.</span>
+              </label>
+              <button
+                className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
+                disabled={busy}
+                type="submit"
+              >
+                {busy ? "Creating account…" : "Create account"}
+              </button>
+            </form>
+            {canResend && (
+              <button
+                className="text-sm font-medium text-emerald-800 underline underline-offset-4 disabled:opacity-60"
+                disabled={busy || !email}
+                onClick={() => void resend()}
+                type="button"
+              >
+                {busy ? "Sending…" : "Resend verification email"}
+              </button>
+            )}
+          </div>
+        )
       ) : (
         <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-5 text-amber-900">
-          Registration is not configured for this deployment. Contact the platform administrator.
+          Registration is not configured for this deployment. Contact the
+          platform administrator.
         </p>
       )}
       <p className="text-sm text-zinc-600">
-        Already have an account? <Link className="font-medium text-emerald-800 underline" href="/login">Sign in</Link>
+        Already have an account?{" "}
+        <Link className="font-medium text-emerald-800 underline" href="/login">
+          Sign in
+        </Link>
       </p>
     </section>
   );

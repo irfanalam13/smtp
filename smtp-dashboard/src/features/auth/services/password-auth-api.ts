@@ -121,7 +121,9 @@ export function resendVerification(email: string): Promise<AccountEmailAction> {
   return post("/v1/auth/email/resend-verification", { email });
 }
 
-export function requestPasswordReset(email: string): Promise<AccountEmailAction> {
+export function requestPasswordReset(
+  email: string,
+): Promise<AccountEmailAction> {
   return post("/v1/auth/password/forgot", { email });
 }
 

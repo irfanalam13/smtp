@@ -28,7 +28,8 @@ export function ForgotPasswordForm() {
       .catch(() => {
         if (!controller.signal.aborted) {
           setEnabled(false);
-          const message = "Password recovery configuration could not be loaded.";
+          const message =
+            "Password recovery configuration could not be loaded.";
           setError(message);
           toast({ tone: "error", title: "Recovery unavailable", message });
         }
@@ -46,10 +47,12 @@ export function ForgotPasswordForm() {
       toast({
         tone: "success",
         title: "Recovery email requested",
-        message: "If an account can be recovered, password-reset instructions have been sent.",
+        message:
+          "If an account can be recovered, password-reset instructions have been sent.",
       });
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : "The request failed.";
+      const message =
+        reason instanceof Error ? reason.message : "The request failed.";
       setError(message);
       toast({ tone: "error", title: "Request failed", message });
     } finally {
@@ -60,21 +63,32 @@ export function ForgotPasswordForm() {
   return (
     <section aria-labelledby="forgot-password-heading" className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-zinc-900" id="forgot-password-heading">
+        <h1
+          className="text-xl font-semibold text-zinc-900"
+          id="forgot-password-heading"
+        >
           Reset your password
         </h1>
         <p className="mt-1 text-sm leading-6 text-zinc-600">
-          Enter your account email and we&apos;ll send a recovery link if an account can be recovered.
+          Enter your account email and we&apos;ll send a recovery link if an
+          account can be recovered.
         </p>
       </div>
-      {error && <p className="notice notice-error" role="alert">{error}</p>}
+      {error && (
+        <p className="notice notice-error" role="alert">
+          {error}
+        </p>
+      )}
       {submitted && (
         <p className="notice notice-success" role="status">
-          If an account can be recovered, password-reset instructions have been sent.
+          If an account can be recovered, password-reset instructions have been
+          sent.
         </p>
       )}
       {enabled === null ? (
-        <p aria-live="polite" className="text-sm text-zinc-600" role="status">Checking recovery configuration…</p>
+        <p aria-live="polite" className="text-sm text-zinc-600" role="status">
+          Checking recovery configuration…
+        </p>
       ) : enabled ? (
         <form className="space-y-3" onSubmit={(event) => void submit(event)}>
           <label className="block space-y-1.5 text-sm font-medium text-zinc-700">
@@ -102,7 +116,10 @@ export function ForgotPasswordForm() {
           Password recovery is not configured for this deployment.
         </p>
       )}
-      <Link className="text-sm font-medium text-emerald-800 underline underline-offset-4" href="/login">
+      <Link
+        className="text-sm font-medium text-emerald-800 underline underline-offset-4"
+        href="/login"
+      >
         Return to sign in
       </Link>
     </section>
