@@ -94,7 +94,11 @@ func TestSMTPCredentialLifecycleIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create read-only SMTP credential API key: %v", err)
 	}
-	handler := (Handler{Store: NewStore(), Postgres: repository}).Routes()
+	handler := (Handler{
+		Store:            NewStore(),
+		Postgres:         repository,
+		RateLimitHMACKey: bytes.Repeat([]byte("k"), 32),
+	}).Routes()
 
 	createRequest := httptest.NewRequest(
 		http.MethodPost,
@@ -104,6 +108,7 @@ func TestSMTPCredentialLifecycleIntegration(t *testing.T) {
 	createRequest.Header.Set("Authorization", "Bearer "+secretA)
 	createResponse := httptest.NewRecorder()
 	handler.ServeHTTP(createResponse, createRequest)
+
 	if createResponse.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", createResponse.Code, createResponse.Body.String())
 	}

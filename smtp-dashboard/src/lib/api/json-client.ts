@@ -176,11 +176,9 @@ function csrfCookieValue(): string | null {
     return null;
   }
   const configuredName = process.env.NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME?.trim();
-  const names = [
-    configuredName,
-    "__Host-smtp_csrf",
-    "smtp_csrf",
-  ].filter((name): name is string => Boolean(name));
+  const names = [configuredName, "__Host-smtp_csrf", "smtp_csrf"].filter(
+    (name): name is string => Boolean(name),
+  );
   const cookies = document.cookie.split(";");
   for (const name of names) {
     const cookie = cookies.find((item) => item.trim().startsWith(`${name}=`));

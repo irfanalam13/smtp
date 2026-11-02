@@ -219,7 +219,9 @@ export default function ControlPlaneDashboard() {
               <span aria-hidden="true" />
               <span aria-hidden="true" />
             </button>
-            <span className="hidden text-xs font-semibold text-zinc-500 sm:inline">Menu</span>
+            <span className="hidden text-xs font-semibold text-zinc-500 sm:inline">
+              Menu
+            </span>
             <div className="breadcrumb">
               <span>Control plane</span>
               <span className="breadcrumb-separator">/</span>
@@ -264,81 +266,81 @@ export default function ControlPlaneDashboard() {
 
           {dashboard.view === "credentials" && (
             <>
-            <section className="auth-panel">
-              <div className="auth-copy">
-                <span className="auth-lock" aria-hidden="true">
-                  KEY
-                </span>
-                <span>
-                  <strong>
-                    {dashboard.apiToken
-                      ? "Credentials active"
-                      : localDevelopment
-                        ? "Local development authentication"
-                        : "Connect your account"}
-                  </strong>
-                  <small>
-                    {dashboard.apiToken
-                      ? "The token is held in memory only and cleared when the page reloads."
-                      : localDevelopment
-                        ? "The dashboard sends a temporary local identity; the API must have CONTROL_PLANE_DEV_MODE=true to accept it. Otherwise, paste a durable user-bound key."
-                        : "Paste a user-bound API key or OIDC access token to connect."}
-                    {dashboard.principalError || dashboard.connectionError
-                      ? ` ${dashboard.principalError || dashboard.connectionError}`
-                      : ""}
-                  </small>
-                </span>
-              </div>
-              <form className="token-form" onSubmit={dashboard.applyToken}>
-                <label className="visually-hidden" htmlFor="api-token">
-                  API key or OIDC access token
-                </label>
-                <input
-                  autoComplete="off"
-                  id="api-token"
-                  onChange={(event) =>
-                    dashboard.setTokenInput(event.target.value)
-                  }
-                  placeholder="Paste API key or access token"
-                  type="password"
-                  value={dashboard.tokenInput}
-                />
-                <label className="visually-hidden" htmlFor="tenant-id">
-                  Tenant ID for multi-tenant accounts
-                </label>
-                <input
-                  autoComplete="off"
-                  className="tenant-input"
-                  id="tenant-id"
-                  onChange={(event) =>
-                    dashboard.setTenantInput(event.target.value)
-                  }
-                  placeholder="Tenant ID (optional)"
-                  value={dashboard.tenantInput}
-                />
-                <button className="button button-primary" type="submit">
-                  Connect
-                </button>
-                {dashboard.apiToken && (
-                  <button
-                    className="button button-quiet"
-                    onClick={dashboard.clearToken}
-                    type="button"
-                  >
-                    Clear
+              <section className="auth-panel">
+                <div className="auth-copy">
+                  <span className="auth-lock" aria-hidden="true">
+                    KEY
+                  </span>
+                  <span>
+                    <strong>
+                      {dashboard.apiToken
+                        ? "Credentials active"
+                        : localDevelopment
+                          ? "Local development authentication"
+                          : "Connect your account"}
+                    </strong>
+                    <small>
+                      {dashboard.apiToken
+                        ? "The token is held in memory only and cleared when the page reloads."
+                        : localDevelopment
+                          ? "The dashboard sends a temporary local identity; the API must have CONTROL_PLANE_DEV_MODE=true to accept it. Otherwise, paste a durable user-bound key."
+                          : "Paste a user-bound API key or OIDC access token to connect."}
+                      {dashboard.principalError || dashboard.connectionError
+                        ? ` ${dashboard.principalError || dashboard.connectionError}`
+                        : ""}
+                    </small>
+                  </span>
+                </div>
+                <form className="token-form" onSubmit={dashboard.applyToken}>
+                  <label className="visually-hidden" htmlFor="api-token">
+                    API key or OIDC access token
+                  </label>
+                  <input
+                    autoComplete="off"
+                    id="api-token"
+                    onChange={(event) =>
+                      dashboard.setTokenInput(event.target.value)
+                    }
+                    placeholder="Paste API key or access token"
+                    type="password"
+                    value={dashboard.tokenInput}
+                  />
+                  <label className="visually-hidden" htmlFor="tenant-id">
+                    Tenant ID for multi-tenant accounts
+                  </label>
+                  <input
+                    autoComplete="off"
+                    className="tenant-input"
+                    id="tenant-id"
+                    onChange={(event) =>
+                      dashboard.setTenantInput(event.target.value)
+                    }
+                    placeholder="Tenant ID (optional)"
+                    value={dashboard.tenantInput}
+                  />
+                  <button className="button button-primary" type="submit">
+                    Connect
                   </button>
-                )}
-              </form>
-              <Link
-                className="text-xs font-medium text-emerald-800 underline underline-offset-4"
-                href="/login"
-              >
-                Organization sign-in
-              </Link>
-            </section>
-            {dashboard.principal?.subject.startsWith("session:") && (
-              <SessionManagement context={dashboard.requestContext} />
-            )}
+                  {dashboard.apiToken && (
+                    <button
+                      className="button button-quiet"
+                      onClick={dashboard.clearToken}
+                      type="button"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </form>
+                <Link
+                  className="text-xs font-medium text-emerald-800 underline underline-offset-4"
+                  href="/login"
+                >
+                  Organization sign-in
+                </Link>
+              </section>
+              {dashboard.principal?.subject.startsWith("session:") && (
+                <SessionManagement context={dashboard.requestContext} />
+              )}
             </>
           )}
 

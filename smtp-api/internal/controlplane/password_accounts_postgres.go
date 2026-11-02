@@ -20,9 +20,11 @@ type PasswordMembership struct {
 }
 
 type PasswordAccount struct {
-	PasswordHash string
-	Verified     bool
-	Memberships  []PasswordMembership
+	UserID        string
+	PasswordHash  string
+	Verified      bool
+	TOTPConfirmed bool
+	Memberships   []PasswordMembership
 }
 
 type RegisteredAccount struct {
@@ -140,6 +142,7 @@ func (repository *PostgreSQLRepository) registerPasswordAccountWithProfile(
 	encryptionKey []byte,
 	notification *authmail.Message,
 ) (RegisteredAccount, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
 	if !validEmail(email) || passwordHash == "" || len(passwordHash) > 512 ||
 		!validName(firstName, 2, 50) || !validName(lastName, 2, 50) ||
 		!validOptionalField(phoneNumber, 7, 32) || !validOptionalField(country, 2, 100) ||
@@ -319,10 +322,10 @@ func (repository *PostgreSQLRepository) PasswordAccount(
 	}
 	var account PasswordAccount
 	err := repository.pool.QueryRow(ctx, `
-		SELECT password_hash, email_verified_at IS NOT NULL
+		SELECT id::text, password_hash, email_verified_at IS NOT NULL, totp_confirmed_at IS NOT NULL
 		FROM users
 		WHERE email = $1 AND status = 'active' AND password_hash IS NOT NULL
-	`, email).Scan(&account.PasswordHash, &account.Verified)
+	`, email).Scan(&account.UserID, &account.PasswordHash, &account.Verified, &account.TOTPConfirmed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PasswordAccount{}, ErrUnauthorized
 	}

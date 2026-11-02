@@ -1,10 +1,14 @@
 package smtpauth
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
+	"io"
 	"strings"
 )
 
@@ -33,4 +37,44 @@ func VerifyCSRF(cookieValue, headerValue string, expected [sha256.Size]byte) boo
 	}
 	actual := HashSecret(headerValue)
 	return subtle.ConstantTimeCompare(actual[:], expected[:]) == 1
+}
+
+func EncryptSecret(key, plaintext []byte) ([]byte, error) {
+	if len(key) < 16 {
+		return nil, errors.New("encryption key too short")
+	}
+	derivedKey := sha256.Sum256(key)
+	block, err := aes.NewCipher(derivedKey[:])
+	if err != nil {
+		return nil, err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+	return append(nonce, aead.Seal(nil, nonce, plaintext, nil)...), nil
+}
+
+func DecryptSecret(key, ciphertext []byte) ([]byte, error) {
+	if len(key) < 16 {
+		return nil, errors.New("encryption key too short")
+	}
+	derivedKey := sha256.Sum256(key)
+	block, err := aes.NewCipher(derivedKey[:])
+	if err != nil {
+		return nil, err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	if len(ciphertext) < aead.NonceSize() {
+		return nil, errors.New("ciphertext too short")
+	}
+	nonce, payload := ciphertext[:aead.NonceSize()], ciphertext[aead.NonceSize():]
+	return aead.Open(nil, nonce, payload, nil)
 }

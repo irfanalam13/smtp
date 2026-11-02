@@ -46,10 +46,10 @@ func TestPasswordAccountLifecycleIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	email := fmt.Sprintf(
+	email := strings.ToLower(fmt.Sprintf(
 		"password-account-%s@example.test",
 		strings.ReplaceAll(verificationToken[:16], "-", ""),
-	)
+	))
 	initialPassword, err := smtpAuth.HashPassword("initial integration password")
 	if err != nil {
 		t.Fatal(err)

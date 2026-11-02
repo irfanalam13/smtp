@@ -290,16 +290,7 @@ impl InboundAcceptor for PostgresInboundStore {
                ON lower(domain.domain) = lower(split_part(recipient.address, '@', 2))
               AND domain.status = 'verified'
              JOIN tenants AS tenant
-               ON tenant.id = domain.tenant_id AND tenant.status = 'active'
-             JOIN mailbox_addresses AS address
-               ON address.domain_id = domain.id
-              AND lower(address.local_part) = lower(split_part(recipient.address, '@', 1))
-             LEFT JOIN mailbox_aliases AS alias
-               ON alias.id = address.alias_id AND alias.status = 'active'
-             JOIN mailboxes AS mailbox
-               ON mailbox.id = address.mailbox_id
-              AND mailbox.status = 'active'
-             WHERE address.alias_id IS NULL OR alias.id IS NOT NULL",
+               ON tenant.id = domain.tenant_id AND tenant.status = 'active'",
         )
         .bind(recipients)
         .fetch_one(&self.pool)

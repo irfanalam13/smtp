@@ -7,7 +7,9 @@ export default async function ResetPasswordPage({
   searchParams,
 }: PageProps<"/reset-password">) {
   const rawToken = (await searchParams).token;
-  const token = Array.isArray(rawToken) ? rawToken[0] ?? "" : rawToken ?? "";
+  const token = Array.isArray(rawToken)
+    ? (rawToken[0] ?? "")
+    : (rawToken ?? "");
   return (
     <AuthFrame>
       <ResetPasswordForm token={token} />

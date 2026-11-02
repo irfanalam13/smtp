@@ -147,7 +147,7 @@ preserve these exact bytes\r\n"
     );
     let stored = sqlx::query(
         "SELECT tenant_id, envelope_sender, raw_message, message_schema_version,
-                parsed_metadata, subject, received_from_ip::text AS received_from_ip,
+                parsed_metadata, subject, host(received_from_ip) AS received_from_ip,
                 received_by, received_over_tls
          FROM inbound_messages WHERE id = $1",
     )
@@ -160,7 +160,9 @@ preserve these exact bytes\r\n"
         stored.try_get::<String, _>("envelope_sender").unwrap(),
         "bounce@example.test"
     );
-    assert_eq!(stored.try_get::<Vec<u8>, _>("raw_message").unwrap(), raw);
+    let stored_raw = stored.try_get::<Vec<u8>, _>("raw_message").unwrap();
+    assert!(stored_raw.starts_with(b"Received: "));
+    assert!(stored_raw.ends_with(&raw));
     assert_eq!(
         stored.try_get::<i16, _>("message_schema_version").unwrap(),
         1

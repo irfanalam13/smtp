@@ -31,7 +31,8 @@ export function PasswordLogin() {
       .catch(() => {
         if (mounted) {
           setEnabled(false);
-          const message = "Sign-in configuration could not be loaded. Try again later.";
+          const message =
+            "Sign-in configuration could not be loaded. Try again later.";
           setError(message);
           toast({ tone: "error", title: "Sign-in unavailable", message });
         }
@@ -72,14 +73,21 @@ export function PasswordLogin() {
   return (
     <section aria-labelledby="password-login-heading" className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-zinc-900" id="password-login-heading">
+        <h1
+          className="text-xl font-semibold text-zinc-900"
+          id="password-login-heading"
+        >
           Sign in with email
         </h1>
         <p className="mt-1 text-sm leading-6 text-zinc-600">
           Use your verified SMTP Platform account.
         </p>
       </div>
-      {error && <p className="notice notice-error" role="alert">{error}</p>}
+      {error && (
+        <p className="notice notice-error" role="alert">
+          {error}
+        </p>
+      )}
       {enabled === null ? (
         <p aria-live="polite" className="text-sm text-zinc-600" role="status">
           Checking account sign-in…
@@ -136,10 +144,16 @@ export function PasswordLogin() {
         </p>
       )}
       <div className="flex flex-wrap justify-between gap-2 text-sm">
-        <Link className="font-medium text-emerald-800 underline underline-offset-4" href="/forgot-password">
+        <Link
+          className="font-medium text-emerald-800 underline underline-offset-4"
+          href="/forgot-password"
+        >
           Forgot password?
         </Link>
-        <Link className="font-medium text-emerald-800 underline underline-offset-4" href="/signup">
+        <Link
+          className="font-medium text-emerald-800 underline underline-offset-4"
+          href="/signup"
+        >
           Create an account
         </Link>
       </div>

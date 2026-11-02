@@ -9,7 +9,9 @@ export default function LoginPage() {
         <PasswordLogin />
         <div aria-hidden="true" className="flex items-center gap-3">
           <span className="h-px flex-1 bg-zinc-200" />
-          <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">or</span>
+          <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+            or
+          </span>
           <span className="h-px flex-1 bg-zinc-200" />
         </div>
         <OIDCSignIn />

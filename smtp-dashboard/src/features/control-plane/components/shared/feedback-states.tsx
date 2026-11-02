@@ -10,11 +10,18 @@ export function InlineError({
   return (
     <div className="inline-error" role="alert">
       <div className="flex items-center gap-2">
-        <AlertCircleIcon className="h-4 w-4 shrink-0 text-rose-600" aria-hidden="true" />
+        <AlertCircleIcon
+          className="h-4 w-4 shrink-0 text-rose-600"
+          aria-hidden="true"
+        />
         <p>{message}</p>
       </div>
       {onRetry && (
-        <button className="text-button inline-flex items-center gap-1.5" onClick={onRetry} type="button">
+        <button
+          className="text-button inline-flex items-center gap-1.5"
+          onClick={onRetry}
+          type="button"
+        >
           <RefreshCwIcon className="h-3 w-3" aria-hidden="true" />
           <span>Try again</span>
         </button>

@@ -18,11 +18,7 @@ type AuthSession = {
 
 type SessionList = { items: AuthSession[] };
 
-export function SessionManagement({
-  context,
-}: {
-  context: RequestContext;
-}) {
+export function SessionManagement({ context }: { context: RequestContext }) {
   const router = useRouter();
   const [sessions, setSessions] = useState<AuthSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,11 +28,7 @@ export function SessionManagement({
 
   const loadSessions = useCallback(
     async (signal?: AbortSignal) =>
-      requestJson<SessionList>(
-        "/v1/auth/sessions",
-        context,
-        { signal },
-      ),
+      requestJson<SessionList>("/v1/auth/sessions", context, { signal }),
     [context],
   );
 
@@ -116,9 +108,7 @@ export function SessionManagement({
       await requestJson("/v1/auth/logout", context, { method: "POST" });
       router.replace("/login");
     } catch (reason) {
-      setError(
-        reason instanceof Error ? reason.message : "Sign-out failed.",
-      );
+      setError(reason instanceof Error ? reason.message : "Sign-out failed.");
       setBusy("");
     }
   }
@@ -161,7 +151,11 @@ export function SessionManagement({
         </p>
       )}
       {loading ? (
-        <p aria-live="polite" className="mt-4 text-sm text-zinc-600" role="status">
+        <p
+          aria-live="polite"
+          className="mt-4 text-sm text-zinc-600"
+          role="status"
+        >
           Loading active sessions…
         </p>
       ) : sessions.length === 0 ? (
