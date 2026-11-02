@@ -16,7 +16,9 @@ use async_trait::async_trait;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
-use shared_types::{CANONICAL_MESSAGE_SCHEMA_VERSION, CanonicalMessage};
+use shared_types::{
+    CANONICAL_MESSAGE_SCHEMA_VERSION, CanonicalMessage, DsnReport, parse_delivery_status_message,
+};
 use sqlx::{PgPool, Postgres, Row, Transaction, postgres::PgPoolOptions};
 use std::collections::HashMap;
 use thiserror::Error;
@@ -457,6 +459,8 @@ impl InboundAcceptor for PostgresInboundStore {
         }
         let metadata = serde_json::to_value(message.indexed_metadata())
             .map_err(|_| InboundError::InvalidMessage)?;
+        let dsn_reports =
+            parse_delivery_status_message(Uuid::nil(), original_raw_message).unwrap_or_default();
         let mut transaction = self
             .pool
             .begin()
@@ -654,6 +658,16 @@ impl InboundAcceptor for PostgresInboundStore {
                 .await
                 .map_err(|_| InboundError::Temporary)?;
             }
+            for report in &dsn_reports {
+                persist_delivery_status(
+                    &mut transaction,
+                    tenant_id,
+                    mailbox_id,
+                    current_id,
+                    report,
+                )
+                .await?;
+            }
             sqlx::query(
                 "INSERT INTO mailbox_event_outbox
                  (tenant_id, mailbox_id, event_type, idempotency_key, payload)
@@ -679,6 +693,39 @@ impl InboundAcceptor for PostgresInboundStore {
             .await
             .map_err(|_| InboundError::Temporary)?;
             message_id.get_or_insert(current_id);
+        }
+
+        async fn persist_delivery_status(
+            transaction: &mut Transaction<'_, Postgres>,
+            tenant_id: Uuid,
+            mailbox_id: Uuid,
+            inbound_message_id: Uuid,
+            report: &DsnReport,
+        ) -> Result<(), InboundError> {
+            sqlx::query(
+                "INSERT INTO inbound_delivery_status
+                 (id, tenant_id, mailbox_id, inbound_message_id, recipient, action, status,
+                  reporting_mta, diagnostic_code)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 ON CONFLICT (inbound_message_id, recipient, action, status) DO NOTHING",
+            )
+            .bind(Uuid::new_v4())
+            .bind(tenant_id)
+            .bind(mailbox_id)
+            .bind(inbound_message_id)
+            .bind(&report.recipient)
+            .bind(match report.status.action {
+                shared_types::DsnAction::Delivered => "delivered",
+                shared_types::DsnAction::Delayed => "delayed",
+                shared_types::DsnAction::Failed => "failed",
+            })
+            .bind(&report.status.status)
+            .bind(&report.reporting_mta)
+            .bind(report.status.diagnostic_code.as_deref())
+            .execute(&mut **transaction)
+            .await
+            .map_err(|_| InboundError::Temporary)?;
+            Ok(())
         }
         transaction
             .commit()

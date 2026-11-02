@@ -141,6 +141,40 @@ pub fn parse_delivery_status(
     Ok(reports)
 }
 
+/// Extracts the `message/delivery-status` body from a multipart DSN before
+/// applying the bounded RFC 3464 field parser. This deliberately accepts only
+/// CRLF framing so a bare-LF message cannot be reinterpreted across MIME parts.
+pub fn parse_delivery_status_message(
+    source_message_id: Uuid,
+    raw: &[u8],
+) -> Result<Vec<DsnReport>, DsnError> {
+    if raw.is_empty() || raw.len() > MAX_DSN_BYTES {
+        return Err(DsnError::InvalidMessageSize);
+    }
+    let lower = raw
+        .iter()
+        .map(|byte| byte.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    let marker = b"content-type: message/delivery-status";
+    let Some(marker_start) = lower
+        .windows(marker.len())
+        .position(|window| window == marker)
+    else {
+        return Err(DsnError::MissingDeliveryStatusField);
+    };
+    let body_start = raw[marker_start..]
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|offset| marker_start + offset + 4)
+        .ok_or(DsnError::MissingDeliveryStatusField)?;
+    let body_end = raw[body_start..]
+        .windows(4)
+        .position(|window| window == b"\r\n--")
+        .map(|offset| body_start + offset)
+        .unwrap_or(raw.len());
+    parse_delivery_status(source_message_id, &raw[body_start..body_end])
+}
+
 fn push_dsn_field(fields: &mut Vec<(String, String)>, name: &mut String, value: &mut String) {
     if !name.is_empty() {
         fields.push((std::mem::take(name), std::mem::take(value)));
@@ -360,5 +394,25 @@ mod tests {
             parse_delivery_status(Uuid::nil(), &vec![b'x'; MAX_DSN_BYTES + 1]),
             Err(DsnError::InvalidMessageSize)
         ));
+    }
+
+    #[test]
+    fn extracts_delivery_status_from_multipart_report() {
+        let reports = parse_delivery_status_message(
+            Uuid::nil(),
+            b"Content-Type: multipart/report; boundary=\"x\"\r\n\
+              \r\n\
+              --x\r\n\
+              Content-Type: message/delivery-status\r\n\
+              \r\n\
+              Reporting-MTA: dns; mx.example.test\r\n\
+              Final-Recipient: rfc822; user@example.test\r\n\
+              Action: failed\r\n\
+              Status: 5.1.1\r\n\
+              \r\n\
+              --x--\r\n",
+        )
+        .unwrap();
+        assert_eq!(reports[0].recipient, "user@example.test");
     }
 }
