@@ -107,7 +107,7 @@ async fn deliver_inner<R: Resolver>(
     config
         .validate()
         .map_err(|_| DeliveryError::InternalFailure)?;
-    if !config.enabled {
+    if !config.enabled || config.kill_switch {
         return Err(DeliveryError::Disabled);
     }
     if job.body.len() > config.max_message_bytes {

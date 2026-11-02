@@ -26,8 +26,10 @@ impl<R: Resolver> SmtpProcessor<R> {
         &self,
         batch: &ClaimedDeliveryBatch,
     ) -> Result<Vec<RecipientDeliveryResult>, QueueError> {
-        if !self.config.enabled {
-            return Err(QueueError::Processor("real delivery is disabled".into()));
+        if !self.config.enabled || self.config.kill_switch {
+            return Err(QueueError::Processor(
+                "real delivery is disabled or paused by operational kill switch".into(),
+            ));
         }
         let expected_mode = if let Some(relay) = &self.config.smtp_relay {
             match relay.mode {

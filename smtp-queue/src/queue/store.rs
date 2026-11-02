@@ -173,6 +173,9 @@ impl Queue {
                AND delivery.next_attempt_at <= NOW()
                AND ($3::text IS NULL OR message.delivery_mode = $3)
                AND queue.created_at > NOW() - ($1 * INTERVAL '1 millisecond')
+               AND (message.tenant_id IS NULL OR EXISTS (
+                   SELECT 1 FROM tenants WHERE tenants.id = message.tenant_id AND tenants.status = 'active'
+               ))
                AND NOT EXISTS (
                    SELECT 1 FROM mail_delivery_domain_leases AS domain_lease
                    WHERE domain_lease.lease_expires_at > NOW()
@@ -620,8 +623,12 @@ impl Queue {
         let row = sqlx::query(
             "WITH candidate AS (
                 SELECT q.message_id FROM mail_queue q
-                WHERE (q.state IN ('queued', 'retry_scheduled') AND q.next_attempt_at <= NOW())
-                   OR (q.state = 'processing' AND q.lease_expires_at < NOW())
+                JOIN mail_messages m ON m.id = q.message_id
+                WHERE ((q.state IN ('queued', 'retry_scheduled') AND q.next_attempt_at <= NOW())
+                   OR (q.state = 'processing' AND q.lease_expires_at < NOW()))
+                  AND (m.tenant_id IS NULL OR EXISTS (
+                      SELECT 1 FROM tenants WHERE tenants.id = m.tenant_id AND tenants.status = 'active'
+                  ))
                 ORDER BY q.next_attempt_at, q.created_at
                 FOR UPDATE SKIP LOCKED LIMIT 1
             )

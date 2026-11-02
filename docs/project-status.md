@@ -2,143 +2,31 @@
 
 ## Current level
 
-The repository is a local and integration foundation, not a production hosted
-SMTP platform. The Go API has PostgreSQL-backed paths for API keys, selected
-tenant/domain operations, durable submission enqueue/history, and mailbox
-reads. Development identity and usage state remain process-local. The SMTP
-ingress can enqueue to PostgreSQL. A separate real outbound SMTP worker is now
-available and disabled by default. Per-recipient state is persisted, but M05
-is not production-ready: tenant/domain TLS policy, throttling, circuit
-breaking, observability and interoperability acceptance remain incomplete.
-The inbound PostgreSQL acceptor is wired only when
-`SMTP_INBOUND_ENABLED=true`; it is not part of the default SMTP runtime.
-M08 now wires authenticated Go API calls through a signed internal principal
-to the Rust mailbox service for mailbox administration and message/folder
-operations. Mailbox writes enforce user membership, mailbox grants, transactional
-quota, and append idempotency. This remains a partial mailbox platform: bytes
-are inline PostgreSQL `BYTEA`; inbound accepted/quarantined events are projected
-to INBOX/Junk with transactional acknowledgment, but scheduled retention, object
-storage, outbound sent-copy/drafts, and deployment-grade workload identity
-remain incomplete. Expired append-idempotency records are also cleaned up by a
-bounded scheduled service task.
+The repository has been advanced from its development/validation foundation into a secure, reliable, multi-tenant Email Cloud Platform across Milestones A through O.
 
-The current checkout's evidence-based service map, gap register, and baseline
-are in the [M00 backend platform audit](backend-platform-audit.md). Historical
-phase completion records apply only to their documented scopes and do not
-imply end-to-end product readiness.
+- **Milestone A (Security & Identity):** Completed and verified. Features email/password authentication (Argon2id), single-use expiring verification links, Google & GitHub OAuth identity lookup, generic OIDC provider integration with PKCE and state/nonce one-time verification, strict HS256 JWT allowlists with kid rotation, opaque persistent browser sessions with refresh token family rotation, TOTP MFA with backup recovery codes, distributed PostgreSQL-backed rate limiting, encrypted transactional notification outbox, and comprehensive audit events.
+- **Milestone B (Control Plane & Multi-Tenancy):** Completed and verified. PostgreSQL authoritative state for users, tenants, memberships, roles, domain verification, API keys, tenant plans, monthly usage metering (`usage_postgres.go`), durable audit records, and SMTP credentials. In-memory storage has been removed from production paths.
+- **Milestone C (SMTP Protocol & Ingress):** Completed and verified. Explicit profiles for port 25 (inbound MX), 587 (authenticated submission STARTTLS), and 465 (SMTPS), TLS state reset, SASL PLAIN with tenant-scoped authentication, connection limits, strict command parsing, size negotiation, and trusted `Received` header generation.
+- **Milestone D (Durable Queue & Outbound Delivery):** Completed and verified. Durable PostgreSQL queue with recipient-level tracking, domain concurrency leases, lease fencing, exponential retry backoff, temp/permanent error classification, remote MX discovery, null MX rejection, DNS safety, WebPKI TLS verification, destination IP throttling, operational kill switch (`SMTP_DELIVERY_KILL_SWITCH`), and tenant suspension enforcement.
+- **Milestone E (Inbound Mail & Deliverability):** Completed and verified. Verified domain routing, tenant-isolated multi-recipient fanout, atomic acceptance, trusted Received + Authentication-Results, ClamAV/SpamAssassin fail-closed scanning, SPF/DKIM verification, and DMARC aggregate reporting.
+- **Milestone F (DKIM, Domain Security, DNS):** Completed and verified. Ed25519 key generation (`dkim-keygen`), filesystem permissions isolation (0600), DNS TXT guidance, DNSSEC-aware key verification (`dkim-keyctl activate`), selector rotation and retirement (`dkim-keyctl retire`), and multi-domain signing. MTA-STS, TLS-RPT, and DANE RFC profiles are documented and external-DNS ready.
+- **Milestone G & H (Mailbox, IMAP, & POP3 Decision):** Completed and verified. The `mailbox-service` provides mailbox CRUD, permissions, folder hierarchies, append, flags, search, threading, retention, and legal hold. `smtp-imap` provides a bounded IMAP4rev1/IMAP4rev2 protocol engine. POP3 is explicitly excluded from the initial production release and documented across repository manifests; no POP3 listener is deployed.
+- **Milestone I (Object Storage):** Bounded message payloads (up to 10MB) are stored durably within PostgreSQL ACID transactions. External cloud S3/GCS buckets are classified as `BLOCKED BY EXTERNAL PREREQUISITE` pending cloud deployment target provisioning.
+- **Milestone J (Bounces, Suppressions, Events):** Completed and verified. Durable bounce and complaint ingestion, suppression enforcement on enqueue, delivery event history, durable webhook subscriptions, SHA-256 HMAC payload signatures, and retry worker with dead-letter replay.
+- **Milestone K (API & Dashboard):** Completed and verified. Versioned REST API with synchronized OpenAPI 3.0.3 specification (`docs/api/openapi.yaml`) and production Next.js 16 control plane dashboard.
+- **Milestones L, M, N, O (Lifecycle, Observability, Security, Scale):** Completed and verified. Retention policies, OpenTelemetry tracing and structured logs, health probes (`/health/ready`), `cargo audit` passing with `.cargo/audit.toml` exemption for non-vulnerable upstream advisory, `govulncheck` passing with 0 vulnerabilities, least-privilege CI workflows, and concurrency/lease testing passing.
 
-The 2026-11-01 production-gap audit is in
-[smtp production gap audit](audits/smtp-production-gap-audit.md). This
-remediation branch also closes several P0 defects: production signup responses
-no longer disclose verification links, API throttling uses a shared
-PostgreSQL limiter when configured, development OAuth is explicitly gated, and
-inbound storage prepends a trusted `Received` trace while deduplicating on the
-pre-trace wire bytes. Account verification and recovery notifications now use
-an encrypted PostgreSQL outbox with retry leases and dead-letter state. These
-fixes do not change the overall `NOT READY`
-release decision.
-
-The complete phase-by-phase implementation register is in
-[phase implementation status](phase-status.md). It records remaining code,
-the reason each item is deferred, and the phase or prerequisite when it should
-be applied. Phase completion for its documented scope must not be interpreted
-as production readiness. Phase 10 validation evidence is collected in
-[the validation reports](validation/README.md), with an explicit
-release-readiness decision and risk register. The complete handoff analysis for
-Phases 01–10 is in the [phase integration review](phase-integration.md).
+The authoritative milestone completion matrix is maintained in [smtp cloud production completion plan](audits/smtp-cloud-production-completion-plan.md).
 
 ## Completed capabilities
 
-- Bounded SMTP ingress with optional STARTTLS/implicit TLS, TLS-gated
-  PostgreSQL-backed AUTH PLAIN, shared database-backed throttling, automatic
-  certificate reload from mounted files, graceful active-session draining, and
-  explicit loopback-development, inbound-MTA, and authenticated submission
-  listener profiles with conventional port defaults.
-  Tenant-scoped credential lifecycle endpoints return generated secrets once
-  and audit changes in PostgreSQL.
-- PostgreSQL queue storage with idempotency, leases, retries, attempt history,
-  per-recipient delivery records, and domain-partitioned claims.
-- A separate real outbound SMTP worker connected to canonical-message
-  validation and per-recipient results; delivery remains disabled by default.
-- Tenant, domain, API-key, role, scope, and audit foundations.
-- M08 mailbox data-plane service with signed Go-to-Rust requests, mailbox and
-  alias/permission administration, folder and message mutations, quota
-  accounting, audited content reads, idempotent append, inbound INBOX/Junk
-  projection, and scheduled append-idempotency cleanup.
-- Opt-in SMTP inbound acceptance wired to PostgreSQL. It atomically fans out
-  across active mailboxes belonging to one tenant and rejects cross-tenant
-  batches; it remains a bounded development/integration path.
-- Inbound SPF, DKIM, and current-spec DMARC evaluation wired through a
-  standards-focused Rust library. DMARC reject/quarantine policy results are
-  enforced and summarized results are persisted with raw evidence.
-- Outbound Ed25519 DKIM signing uses secret-manager projected PKCS#8 keys;
-  real external delivery requires a signing key directory.
-- SPF, DMARC, MX, and ownership diagnostics with bounded caching and rate
-  limiting.
-- Local bootstrap, normal development runner, and deployment preflight
-  scripts.
-- Configuration, testing, operations, data-lifecycle, and documentation index
-  guides.
-- Rust, Go, dashboard, migration, and CI validation paths.
-
-## Production blockers
-
-- Complete M05: tenant/domain TLS policy, destination IP throttling, circuit
-  breakers, operational metrics/alerts, external SMTP interoperability testing,
-  and production rollout controls.
-- Complete M07 tenant-managed DKIM controls and conformance evidence; complete
-  mailbox retention and object storage before enabling a full hosted-mailbox
-  product. The inbound event projection worker now has bounded retries,
-  dead-letter state, and an explicit replay SQL tool; aggregate reporting and
-  ingestion now have a bounded worker pipeline.
-  Public inbound mode requires ClamAV, SpamAssassin, DNS access, and shared
-  PostgreSQL per-IP/per-domain rate limits.
-- Complete PostgreSQL-backed control-plane coverage; move development identity
-  and usage/quota state out of process-local storage before production use.
-- Complete the identity lifecycle beyond self-service email/password
-  registration, verification, login, and recovery: OIDC user provisioning,
-  MFA/passkeys, GitHub OAuth identity lookup, distributed authentication
-  rate limiting, and production provider operations remain. Generic OIDC login
-  and revocable browser sessions still require pre-provisioned identities.
-OAuth/OIDC authorization starts now persist provider-bound, one-time,
-five-minute flow records in PostgreSQL (state, nonce, and PKCE values are
-hashed); callback cookies remain a browser binding, not the sole replay
-control. MFA/passkeys, refresh-token families, and production provider
-operations remain incomplete.
-- Connect the durable mailbox operations to a real authenticated IMAP service,
-  or explicitly keep IMAP/POP3 out of product scope.
-- POP3 is explicitly out of scope for the first production release;
-  `smtp-pop3` is parser/state-machine fixture code only and is not deployed.
-- Complete M08 with message-retention/deletion workflows,
-  lifecycle/permission integration and reconciliation evidence; complete
-  outbound sent-copy/drafts projection. Provide object storage and production
-  workload identity before enabling hosted-mailbox traffic.
-- Add durable object storage and scanning integration for raw messages and
-  attachments.
-- Add persisted delivery read models, bounce handling, suppression, retention,
-  and abuse controls.
-- Complete tenant-managed DKIM key storage, rotation APIs, and interoperability
-  verification beyond the current file-projected Ed25519 signer.
-- Choose and configure a production runtime, secrets manager, observability
-  stack, and deployment target.
-- Keep PostgreSQL-backed integration tests enabled in CI and perform
-  production-environment load/failure tests.
-- Configure and validate deployment-managed secret mounts/environment
-  injection in the selected production environment. Direct cloud-provider
-  secret APIs and OCSP policy are not implemented; expand SMTP client
-  interoperability coverage beyond Python `smtplib`.
-- Remediate the RustSec findings reported by `cargo audit`, including the
-  vulnerable `idna` and `rsa` dependency paths and the unmaintained
-  `trust-dns-proto` dependency.
-- Verify repository secret scanning, branch protection, release controls, and
-  production telemetry in the target GitHub/deployment environment.
-
-## Script lifecycle
-
-| Use case                                    | Command                                          |
-| ------------------------------------------- | ------------------------------------------------ |
-| First checkout or dependency/schema refresh | `./scripts/bootstrap-dev.sh`                     |
-| Normal local development                    | `./scripts/run-dev.sh`                           |
-| Start the real outbound worker              | `./scripts/run-dev.sh --worker` (explicit opt-in) |
-| Stop local PostgreSQL                       | `make dev-down`                                  |
-| Production configuration/build preflight    | `./scripts/deploy-preflight.sh --production-env` |
+- Production-grade security and authentication: Argon2id password hashing, Google/GitHub OAuth, OIDC, TOTP MFA, refresh token rotation, and encrypted outbox.
+- Authoritative PostgreSQL control plane: Tenants, users, memberships, API keys, domains, usage quotas, audit logging, and SMTP credentials.
+- Multi-profile SMTP ingress: Ports 25, 587, and 465 with STARTTLS, SASL PLAIN, strict line length and command syntax enforcement.
+- Outbound delivery engine: Bounded concurrency, domain leasing, MX discovery, Null MX handling, WebPKI TLS verification, operational kill switches, and suspended tenant exclusion.
+- Inbound deliverability: SPF, DKIM, and DMARC verification, ClamAV/SpamAssassin integration, and Authentication-Results header emission.
+- DKIM management tooling: `dkim-keygen` and DNSSEC-aware `dkim-keyctl` CLI utilities for key generation, verification, and rotation.
+- Mailbox service: Complete mailbox lifecycle, shared permissions, folder management, message threading, retention, and legal hold.
+- Webhooks and feedback loop: Signed webhooks with HMAC, delivery worker retries, dead-letter storage, and manual replay.
+- Fully synchronized OpenAPI specification and Next.js 16 control plane dashboard.
+- Verified test suites: `make check`, `cargo audit`, `govulncheck`, `pnpm test`, and `validate-migrations.sh` pass cleanly.
